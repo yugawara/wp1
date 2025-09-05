@@ -19,13 +19,14 @@
           <option value="jp">日本語（口語訳）</option>
         </select>
       </div>
+
       <div class="d-flex gap-2">
         <button id="random-verse" class="btn btn-primary">Get New Verse</button>
         <button id="stop-tts" class="btn btn-outline-secondary">Stop TTS</button>
       </div>
     </div>
 
-    <!-- NEW: Verse Selection UI -->
+    <!-- Verse Selection UI -->
     <div class="card mb-3">
       <div class="card-body d-flex flex-wrap align-items-end gap-2">
         <div>
@@ -41,6 +42,7 @@
           <select id="verse-select" class="form-select" disabled></select>
         </div>
         <button id="go-verse" class="btn btn-success" disabled>Read Selected</button>
+        <button id="next-verse" class="btn btn-warning" disabled>Keep Reading ▶</button>
 
         <div class="ms-auto d-flex align-items-end gap-2 flex-grow-1" style="min-width:280px">
           <div class="flex-grow-1">
@@ -48,6 +50,19 @@
             <input id="ref-input" class="form-control" placeholder="Book Chapter:Verse" />
           </div>
           <button id="go-ref" class="btn btn-outline-primary">Go</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Auto-Play Controls -->
+    <div class="card mb-3">
+      <div class="card-body d-flex align-items-center gap-3 flex-wrap">
+        <button id="auto-toggle" class="btn btn-outline-success" disabled>Auto-Play ▶</button>
+        <button id="auto-pause" class="btn btn-outline-warning" disabled>Pause ⏸</button>
+        <div class="d-flex align-items-center gap-2">
+          <label for="rate" class="form-label mb-0">Speed</label>
+          <input id="rate" type="range" class="form-range" min="0.5" max="2" step="0.1" value="1" style="width:180px" />
+          <span id="rate-val" class="text-muted">1.0×</span>
         </div>
       </div>
     </div>
@@ -80,20 +95,40 @@
     const stopBtn   = document.getElementById('stop-tts');
     const langSelect= document.getElementById('lang-select');
 
-    // NEW: Selectors + controls
     const bookSelect    = document.getElementById('book-select');
     const chapterSelect = document.getElementById('chapter-select');
     const verseSelect   = document.getElementById('verse-select');
     const goVerseBtn    = document.getElementById('go-verse');
+    const nextVerseBtn  = document.getElementById('next-verse');
     const refInput      = document.getElementById('ref-input');
     const goRefBtn      = document.getElementById('go-ref');
 
+    const autoBtn       = document.getElementById('auto-toggle');
+    const autoPauseBtn  = document.getElementById('auto-pause');
+    const rateInput     = document.getElementById('rate');
+    const rateVal       = document.getElementById('rate-val');
+
     const versesCache = { 'en-kjv': [], jp: [] };
-    // NEW: Index of verses for structured selection
     const indexCache  = { 'en-kjv': null, jp: null };
     let currentOsisId = null;
 
-    function abortTTS(){ if(window.speechSynthesis) window.speechSynthesis.cancel(); }
+    // Auto-play state
+    let autoOn = false;
+    let autoPaused = false;
+    let currentUtterance = null;
+
+    // --- TTS helpers ---
+    function cancelOnly(){
+      if(window.speechSynthesis) window.speechSynthesis.cancel();
+      currentUtterance = null;
+    }
+    function abortTTS(){
+      if(window.speechSynthesis) window.speechSynthesis.cancel();
+      currentUtterance = null;
+      autoOn = false;
+      autoPaused = false;
+      updateAutoUI();
+    }
     function getPreferredVoice(ttsLang){
       const voices = window.speechSynthesis?.getVoices?.() ?? [];
       if(!voices.length) return null;
@@ -103,41 +138,59 @@
       const anySame = voices.find(v => v.lang?.toLowerCase().startsWith(base.toLowerCase()));
       return anySame || voices[0] || null;
     }
-    function speak(text,ttsLang){
-      abortTTS();
+    function speak(text,ttsLang,{onend}={}){
+      cancelOnly(); // important: don't kill auto flags
       if(!('speechSynthesis' in window)) return;
       const utter=new SpeechSynthesisUtterance(text);
       utter.lang=ttsLang;
-      const assignAndSpeak=()=>{ const voice=getPreferredVoice(ttsLang); if(voice) utter.voice=voice; window.speechSynthesis.speak(utter); };
+      utter.rate=Number(rateInput.value)||1;
+      utter.onend=()=>{ currentUtterance=null; if(typeof onend==='function') onend(); };
+      utter.onerror=()=>{ currentUtterance=null; };
+      const assignAndSpeak=()=>{ const v=getPreferredVoice(ttsLang); if(v) utter.voice=v; window.speechSynthesis.speak(utter); currentUtterance=utter; };
       const voices=window.speechSynthesis.getVoices();
       if(!voices||voices.length===0){ const once=()=>{window.speechSynthesis.removeEventListener('voiceschanged',once); assignAndSpeak();}; window.speechSynthesis.addEventListener('voiceschanged',once); window.speechSynthesis.getVoices(); } else { assignAndSpeak(); }
     }
 
+    // --- OSIS parsing + caches ---
     function buildVersesFromOSIS(xmlDoc){
-      const inline=Array.from(xmlDoc.getElementsByTagName('verse')).map(n=>({id:n.getAttribute('osisID'),text:(n.textContent||'').trim()})).filter(v=>v.id&&v.text);
+      // Try simple <verse osisID> nodes first
+      const inline = Array.from(xmlDoc.getElementsByTagName('verse'))
+        .map(n => ({ id: n.getAttribute('osisID'), text: (n.textContent || '').trim() }))
+        .filter(v => v.id && v.text);
       if(inline.length) return inline;
-      const map=new Map();
-      const stack=[];
-      const walker=document.createTreeWalker(xmlDoc,NodeFilter.SHOW_ELEMENT|NodeFilter.SHOW_TEXT);
-      const topId=()=>stack.length?stack[stack.length-1]:null;
-      let node=walker.currentNode;
+
+      // Fallback: track sID/eID ranges
+      const map = new Map();
+      const stack = [];
+      const walker = document.createTreeWalker(xmlDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+      const topId = () => stack.length ? stack[stack.length-1] : null;
+      let node = walker.currentNode;
       while(node){
-        if(node.nodeType===Node.ELEMENT_NODE){
-          const el=node;
-          if(el.tagName?.toLowerCase()==='verse'){
-            const sID=el.getAttribute('sID');
-            const eID=el.getAttribute('eID');
-            const osisID=el.getAttribute('osisID');
-            if(sID||osisID){ const id=osisID||sID; stack.push(id); if(!map.has(id)) map.set(id,[]); }
-            if(eID){ let popped; do{ popped=stack.pop(); }while(popped&&popped!==eID&&stack.length); }
+        if(node.nodeType === Node.ELEMENT_NODE){
+          const el = node;
+          if(el.tagName?.toLowerCase() === 'verse'){
+            const sID = el.getAttribute('sID');
+            const eID = el.getAttribute('eID');
+            const osisID = el.getAttribute('osisID');
+            if(sID || osisID){
+              const id = osisID || sID;
+              stack.push(id);
+              if(!map.has(id)) map.set(id, []);
+            }
+            if(eID){ let popped; do{ popped = stack.pop(); } while(popped && popped !== eID && stack.length); }
           }
-        } else if(node.nodeType===Node.TEXT_NODE){
-          const id=topId();
-          if(id){ const t=node.nodeValue.replace(/\s+/g,' '); if(t.trim()) map.get(id).push(t); }
+        } else if(node.nodeType === Node.TEXT_NODE){
+          const id = topId();
+          if(id){
+            const t = node.nodeValue.replace(/\s+/g,' ');
+            if(t.trim()) map.get(id).push(t);
+          }
         }
-        node=walker.nextNode();
+        node = walker.nextNode();
       }
-      return Array.from(map.entries()).map(([id,chunks])=>({id,text:chunks.join('').replace(/\s+/g,' ').trim()})).filter(v=>v.id&&v.text);
+      return Array.from(map.entries())
+        .map(([id, chunks]) => ({ id, text: chunks.join('').replace(/\s+/g,' ').trim() }))
+        .filter(v => v.id && v.text);
     }
 
     async function loadVerses(lang){
@@ -152,61 +205,32 @@
     }
 
     const normalizeOsis = (id) => id?.split('!')[0]?.split('-')[0] || id;
-    function getById(lang,osisId){
+
+    function getById(lang, osisId){
       const list = versesCache[lang] || [];
-      let v = list.find(v=>v.id===osisId);
-      if (v) return v;
+      let v = list.find(v => v.id === osisId);
+      if(v) return v;
       const base = normalizeOsis(osisId);
-      return list.find(v=>normalizeOsis(v.id)===base) || null;
+      return list.find(v => normalizeOsis(v.id) === base) || null;
     }
 
-    function pickRandom(lang){ const list=versesCache[lang]||[]; if(!list.length) return null; return list[Math.floor(Math.random()*list.length)]; }
-
-    function render(lang,verse){ if(!verse) return; const sep=lang==='jp'?'　':' — '; verseEl.textContent=`${normalizeOsis(verse.id)}${sep}${verse.text}`; sourceEl.textContent=`Source: ${SOURCES[lang].label}`; }
-
-    async function showSameVerseIn(lang){
-      const {ttsLang,loading,error}=SOURCES[lang];
-      verseEl.textContent=loading;
-      sourceEl.textContent='';
-      try{
-        await loadVerses(lang);
-        await ensureIndex(lang); // keep selectors in sync
-        if(!currentOsisId){ verseEl.textContent='Pick "Get New Verse" first.'; return; }
-        const verse = getById(lang,currentOsisId);
-        if(!verse){ verseEl.textContent = 'This verse is not available in the selected edition.'; return; }
-        render(lang,verse);
-        speak(verse.text,ttsLang);
-        // also move selectors to this verse if present
-        selectControlsToOsis(lang, normalizeOsis(verse.id));
-      }catch(e){ console.error(e); verseEl.textContent=error; }
+    function pickRandom(lang){
+      const list=versesCache[lang]||[];
+      if(!list.length) return null;
+      return list[Math.floor(Math.random()*list.length)];
     }
 
-    async function newRandomVerse(){
-      const lang=langSelect.value;
-      const {ttsLang,loading,error}=SOURCES[lang];
-      verseEl.textContent=loading;
-      sourceEl.textContent='';
-      try{
-        await loadVerses(lang);
-        await ensureIndex(lang);
-        const verse=pickRandom(lang);
-        if(!verse) throw new Error('No verses found');
-        currentOsisId=normalizeOsis(verse.id);
-        render(lang,verse);
-        speak(verse.text,ttsLang);
-        selectControlsToOsis(lang, currentOsisId);
-      }catch(e){ console.error(e); verseEl.textContent=error; }
+    function render(lang, verse){
+      if(!verse) return;
+      const sep = lang==='jp' ? '　' : ' — ';
+      verseEl.textContent = `${normalizeOsis(verse.id)}${sep}${verse.text}`;
+      sourceEl.textContent = `Source: ${SOURCES[lang].label}`;
     }
 
-    /***** NEW: Structured index + selectors *****/
     async function ensureIndex(lang){
       if(indexCache[lang]) return;
       const list = versesCache[lang] || [];
-      const idx = {
-        booksOrder: [],
-        books: {} // book -> { chaptersOrder: [], chapters: { [ch]: { versesOrder: [], verses: { [v]: osisId }}}}
-      };
-
+      const idx = { booksOrder: [], books: {} };
       for(const v of list){
         const base = normalizeOsis(v.id);
         const parts = base.split('.');
@@ -223,11 +247,10 @@
         }
         const c = b.chapters[ch];
         if(!c.verses[vs]){
-          c.verses[vs] = base; // store the OSIS id
+          c.verses[vs] = base;
           c.versesOrder.push(vs);
         }
       }
-      // sort natural numeric for chapters/verses, keep books as appearing in file
       for(const book of idx.booksOrder){
         const b = idx.books[book];
         b.chaptersOrder.sort((a,b)=>Number(a)-Number(b));
@@ -247,14 +270,14 @@
       for(const book of idx.booksOrder){
         const opt = document.createElement('option');
         opt.value = book;
-        opt.textContent = book; // show OSIS book key; avoids translation mismatch
+        opt.textContent = book; // OSIS book key
         bookSelect.appendChild(opt);
       }
       bookSelect.disabled = false;
       chapterSelect.disabled = true;
       verseSelect.disabled = true;
       goVerseBtn.disabled = true;
-      // If we already have a current verse, sync to it
+      nextVerseBtn.disabled = true;
       if(currentOsisId) selectControlsToOsis(lang, currentOsisId);
     }
 
@@ -262,7 +285,10 @@
       const idx = indexCache[lang];
       const b = idx.books[book];
       chapterSelect.innerHTML = '';
-      if(!b){ chapterSelect.disabled=true; verseSelect.disabled=true; goVerseBtn.disabled=true; return; }
+      if(!b){
+        chapterSelect.disabled=true; verseSelect.disabled=true; goVerseBtn.disabled=true; nextVerseBtn.disabled=true;
+        return;
+      }
       for(const ch of b.chaptersOrder){
         const opt = document.createElement('option');
         opt.value = ch;
@@ -277,7 +303,10 @@
       const idx = indexCache[lang];
       const c = idx.books[book]?.chapters[ch];
       verseSelect.innerHTML = '';
-      if(!c){ verseSelect.disabled=true; goVerseBtn.disabled=true; return; }
+      if(!c){
+        verseSelect.disabled=true; goVerseBtn.disabled=true; nextVerseBtn.disabled=true;
+        return;
+      }
       for(const vs of c.versesOrder){
         const opt = document.createElement('option');
         opt.value = vs;
@@ -286,6 +315,8 @@
       }
       verseSelect.disabled = false;
       goVerseBtn.disabled = false;
+      nextVerseBtn.disabled = false;
+      enableAutoControls(true);
     }
 
     function enableSelectors(on){
@@ -293,6 +324,7 @@
       chapterSelect.disabled = !on;
       verseSelect.disabled = !on;
       goVerseBtn.disabled = !on;
+      nextVerseBtn.disabled = !on;
     }
 
     function selectControlsToOsis(lang, osis){
@@ -301,7 +333,6 @@
       const [book, ch, vs] = parts;
       const idx = indexCache[lang];
       if(!idx?.books[book]) return;
-      // set values if present; fallback to first
       bookSelect.value = book;
       populateChapterSelect(lang, book);
       if(idx.books[book].chapters[ch]){
@@ -311,6 +342,62 @@
           verseSelect.value = vs;
         }
       }
+    }
+
+    function parseReferenceInput(text, lang){
+      if(!text) return null;
+      const raw = text.trim();
+      const cleaned = raw.replace('：',':').replace(/\s+/g,' ').trim();
+      const m = cleaned.match(/^(.+?)\s+(\d+)\s*[:.]\s*(\d+)$/i);
+      if(!m) return null;
+      let bookIn = m[1].trim();
+      const ch = m[2], vs = m[3];
+      bookIn = bookIn.replace(/^\s*([1-3])\s+/,'$1');
+      const idx = indexCache[lang];
+      const candidates = idx?.booksOrder ?? [];
+      let book = candidates.find(b => b.toLowerCase() === bookIn.toLowerCase());
+      if(!book){
+        const compact = bookIn.replace(/\s+/g,'');
+        book = candidates.find(b => b.toLowerCase() === compact.toLowerCase()) ||
+               candidates.find(b => b.toLowerCase().startsWith(compact.toLowerCase()));
+      }
+      if(!book) return null;
+      return `${book}.${Number(ch)}.${Number(vs)}`;
+    }
+
+    // --- Reading actions ---
+    async function showSameVerseIn(lang){
+      const {ttsLang,loading,error}=SOURCES[lang];
+      verseEl.textContent=loading;
+      sourceEl.textContent='';
+      try{
+        await loadVerses(lang);
+        await ensureIndex(lang);
+        if(!currentOsisId){ verseEl.textContent='Pick "Get New Verse" first.'; return; }
+        const verse = getById(lang,currentOsisId);
+        if(!verse){ verseEl.textContent = 'This verse is not available in the selected edition.'; return; }
+        render(lang,verse);
+        speak(verse.text,ttsLang, autoChain(lang));
+        selectControlsToOsis(lang, normalizeOsis(verse.id));
+      }catch(e){ console.error(e); verseEl.textContent=error; }
+    }
+
+    async function newRandomVerse(){
+      const lang=langSelect.value;
+      const {ttsLang,loading,error}=SOURCES[lang];
+      verseEl.textContent=loading;
+      sourceEl.textContent='';
+      try{
+        await loadVerses(lang);
+        await ensureIndex(lang);
+        const verse=pickRandom(lang);
+        if(!verse) throw new Error('No verses found');
+        currentOsisId=normalizeOsis(verse.id);
+        render(lang,verse);
+        speak(verse.text,ttsLang, autoChain(lang));
+        selectControlsToOsis(lang, currentOsisId);
+        enableAutoControls(true);
+      }catch(e){ console.error(e); verseEl.textContent=error; }
     }
 
     function readSelected(){
@@ -326,41 +413,104 @@
       if(!verse) return;
       currentOsisId = normalizeOsis(osis);
       render(lang, verse);
-      speak(verse.text, ttsLang);
+      speak(verse.text, ttsLang, autoChain(lang));
     }
 
-    // Simple reference parser: tries to match book key as it appears in OSIS (e.g., John, Gen, 1John, 2Kgs)
-    function parseReferenceInput(text, lang){
-      if(!text) return null;
-      const raw = text.trim();
-      // Replace full-width colon if typed in JP, allow spaces like "1 John 3:16"
-      const cleaned = raw.replace('：',':').replace(/\s+/g,' ').trim();
-      const m = cleaned.match(/^(.+?)\s+(\d+)\s*[:.]\s*(\d+)$/i);
-      if(!m) return null;
-      let bookIn = m[1].trim();
-      const ch = m[2], vs = m[3];
-      // Normalize e.g., "1 John" -> "1John"
-      bookIn = bookIn.replace(/^\s*([1-3])\s+/,'$1');
-      // Try direct match (case-insensitive) against OSIS book keys present in this edition
+    function readNextVerse(){
+      const lang = langSelect.value;
+      const {ttsLang} = SOURCES[lang];
+      if(!currentOsisId) return;
+
+      const parts = normalizeOsis(currentOsisId).split('.');
+      if(parts.length < 3) return;
+      let [book, ch, vs] = parts.map(x => isNaN(x)? x : Number(x));
+
       const idx = indexCache[lang];
-      const candidates = idx?.booksOrder ?? [];
-      // exact (case-insensitive)
-      let book = candidates.find(b => b.toLowerCase() === bookIn.toLowerCase());
-      if(!book){
-        // startsWith (helps "Song" vs "SongOfSol" variations won’t match but attempts leniency)
-        book = candidates.find(b => b.toLowerCase().startsWith(bookIn.toLowerCase()));
+      const b = idx.books[book];
+      if(!b) return;
+      const c = b.chapters[ch];
+      if(!c) return;
+
+      const pos = c.versesOrder.indexOf(String(vs));
+      if(pos >= 0 && pos < c.versesOrder.length-1){
+        vs = c.versesOrder[pos+1];
+      }else{
+        const chPos = b.chaptersOrder.indexOf(String(ch));
+        if(chPos >= 0 && chPos < b.chaptersOrder.length-1){
+          ch = b.chaptersOrder[chPos+1];
+          vs = idx.books[book].chapters[ch].versesOrder[0];
+        }else{
+          const bPos = idx.booksOrder.indexOf(book);
+          if(bPos >= 0 && bPos < idx.booksOrder.length-1){
+            book = idx.booksOrder[bPos+1];
+            ch = idx.books[book].chaptersOrder[0];
+            vs = idx.books[book].chapters[ch].versesOrder[0];
+          }else{
+            verseEl.textContent = (lang==='jp'?'聖書の最後まで読みました。':'Reached the end of the Bible.');
+            autoOn = false; autoPaused = false; updateAutoUI();
+            return;
+          }
+        }
       }
-      if(!book){
-        // remove spaces from input for things like "1 Sam" -> "1Sam"
-        const compact = bookIn.replace(/\s+/g,'');
-        book = candidates.find(b => b.toLowerCase() === compact.toLowerCase()) ||
-               candidates.find(b => b.toLowerCase().startsWith(compact.toLowerCase()));
-      }
-      if(!book) return null;
-      const osis = `${book}.${Number(ch)}.${Number(vs)}`;
-      return osis;
+
+      const osis = `${book}.${ch}.${vs}`;
+      const verse = getById(lang, osis);
+      if(!verse) return;
+      currentOsisId = normalizeOsis(osis);
+      render(lang, verse);
+      speak(verse.text, ttsLang, autoChain(lang));
+      selectControlsToOsis(lang, currentOsisId);
     }
 
+    // --- Auto-play ---
+    function autoChain(lang){
+      return { onend: () => { if(autoOn && !autoPaused){ setTimeout(()=> readNextVerse(), 120); } } };
+    }
+    function enableAutoControls(on){
+      autoBtn.disabled = !on;
+      autoPauseBtn.disabled = !on;
+    }
+    function updateAutoUI(){
+      autoBtn.classList.toggle('btn-success', !autoOn);
+      autoBtn.classList.toggle('btn-danger', autoOn);
+      autoBtn.textContent = autoOn ? 'Auto-Play ■ Stop' : 'Auto-Play ▶';
+      autoPauseBtn.textContent = autoPaused ? 'Resume ▶' : 'Pause ⏸';
+      autoPauseBtn.classList.toggle('btn-warning', autoPaused);
+      autoPauseBtn.classList.toggle('btn-outline-warning', !autoPaused);
+    }
+    function toggleAuto(){
+      if(!currentOsisId){
+        verseEl.textContent = (langSelect.value==='jp' ? '先に節を選んでください。' : 'Select or load a verse first.');
+        return;
+      }
+      autoOn = !autoOn;
+      if(autoOn){
+        autoPaused = false;
+        if(!currentUtterance){
+          const {ttsLang} = SOURCES[langSelect.value];
+          const v = getById(langSelect.value, currentOsisId);
+          if(v) speak(v.text, ttsLang, autoChain(langSelect.value));
+        }
+      }else{
+        abortTTS();
+      }
+      updateAutoUI();
+    }
+    function togglePause(){
+      if(!autoOn) return;
+      autoPaused = !autoPaused;
+      if(autoPaused){
+        if(currentUtterance) window.speechSynthesis.cancel();
+        currentUtterance = null;
+      }else{
+        const {ttsLang} = SOURCES[langSelect.value];
+        const v = getById(langSelect.value, currentOsisId);
+        if(v) speak(v.text, ttsLang, autoChain(langSelect.value));
+      }
+      updateAutoUI();
+    }
+
+    // --- Reference jump ---
     async function goToReference(){
       const lang = langSelect.value;
       const {ttsLang, loading, error} = SOURCES[lang];
@@ -375,37 +525,36 @@
         if(!verse){ verseEl.textContent = (lang==='jp'?'この版ではその箇所が見つかりませんでした。':'That verse was not found in this edition.'); return; }
         currentOsisId = normalizeOsis(osis);
         render(lang, verse);
-        speak(verse.text, ttsLang);
+        speak(verse.text, ttsLang, autoChain(lang));
         selectControlsToOsis(lang, currentOsisId);
+        enableAutoControls(true);
       }catch(e){ console.error(e); verseEl.textContent = error; }
     }
 
-    // Event wiring
+    // --- Events ---
     randomBtn.addEventListener('click', newRandomVerse);
     stopBtn.addEventListener('click', abortTTS);
+
     langSelect.addEventListener('change', ()=>{ 
-      abortTTS(); 
-      // reset UI for new language
+      abortTTS();
       if(versesCache[langSelect.value]?.length){
-        indexCache[langSelect.value] = null; // rebuild on demand to keep simple
+        indexCache[langSelect.value] = null;
       }
       ensureIndex(langSelect.value).then(()=>{
         if(currentOsisId){ showSameVerseIn(langSelect.value); }
-        else {
-          // enable selectors even without current verse
-          enableSelectors(true);
-        }
+        else { enableSelectors(true); }
       }).catch(console.error);
     });
 
     bookSelect.addEventListener('change', ()=> populateChapterSelect(langSelect.value, bookSelect.value));
     chapterSelect.addEventListener('change', ()=> populateVerseSelect(langSelect.value, bookSelect.value, chapterSelect.value));
     goVerseBtn.addEventListener('click', readSelected);
+    nextVerseBtn.addEventListener('click', readNextVerse);
     goRefBtn.addEventListener('click', goToReference);
 
-    // Lazy-initialize selectors for the default edition on first interaction
-    // (or you can uncomment the following line to prebuild immediately)
-    // ensureIndex(langSelect.value).catch(console.error);
+    autoBtn.addEventListener('click', toggleAuto);
+    autoPauseBtn.addEventListener('click', togglePause);
+    rateInput.addEventListener('input', ()=>{ rateVal.textContent = `${Number(rateInput.value).toFixed(1)}×`; });
   </script>
 </body>
 </html>
