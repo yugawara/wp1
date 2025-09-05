@@ -13,77 +13,81 @@
 <body>
   <div class="container py-5">
     <h1 class="mb-4">Bible Reader</h1>
-    <div class="mb-3">
-      <label for="lang-select" class="form-label">Language:</label>
-      <select id="lang-select" class="form-select w-auto d-inline-block">
-        <option value="en" selected>English</option>
-        <option value="jp">日本語</option>
-      </select>
+
+    <div class="d-flex align-items-center gap-3 mb-3">
+      <div>
+        <label for="lang-select" class="form-label">Language:</label>
+        <select id="lang-select" class="form-select w-auto d-inline-block">
+          <option value="en-kjv" selected>English (KJV)</option>
+          <option value="en-oeb">English (OEB)</option>
+          <option value="jp">日本語（口語訳）</option>
+        </select>
+      </div>
+      <button id="new-verse" class="btn btn-primary">New Verse</button>
+      <button id="stop-tts" class="btn btn-outline-secondary">Stop TTS</button>
     </div>
+
     <p id="verse" class="lead">Loading verse...</p>
-    <button id="new-verse" class="btn btn-primary mb-4">New Verse</button>
+    <small id="source" class="text-muted"></small>
   </div>
 
   <script type="module" defer>
-    // --- Imports ---
-    import bibleQuotes from 'https://esm.sh/bible-quotes';
+    const SOURCES = {
+      'en-kjv': {
+        url: 'https://raw.githubusercontent.com/seven1m/open-bibles/master/eng-kjv.osis.xml',
+        ttsLang: 'en-US',
+        loading: 'Loading verse...',
+        error: 'Failed to load verse.',
+        label: 'King James Version (KJV)'
+      },
+      'en-oeb': {
+        url: 'https://raw.githubusercontent.com/seven1m/open-bibles/master/eng-us-oeb.osis.xml',
+        ttsLang: 'en-US',
+        loading: 'Loading verse...',
+        error: 'Failed to load verse.',
+        label: 'Open English Bible (OEB)'
+      },
+      jp: {
+        url: 'https://raw.githubusercontent.com/seven1m/open-bibles/master/jpn-kougo.osis.xml',
+        ttsLang: 'ja-JP',
+        loading: '読み込んでいます…',
+        error: '読み込みエラーが発生しました',
+        label: '口語訳聖書'
+      }
+    };
 
-    // --- Globals & UI refs ---
     const verseEl     = document.getElementById('verse');
+    const sourceEl    = document.getElementById('source');
     const newVerseBtn = document.getElementById('new-verse');
+    const stopBtn     = document.getElementById('stop-tts');
     const langSelect  = document.getElementById('lang-select');
 
-    // English setup
-    const enMethods = Object.keys(bibleQuotes).filter(k => typeof bibleQuotes[k] === 'function');
-    let enCurrentText = '';
+    const versesCache = { 'en-kjv': [], 'en-oeb': [], jp: [] };
 
-    // Japanese setup
-    const OSIS_URL = 'https://raw.githubusercontent.com/seven1m/open-bibles/master/jpn-kougo.osis.xml';
-    let jpVerses = [];
-
-    // --- Helpers ---
     function abortTTS() {
-      if (window.speechSynthesis) {
-        window.speechSynthesis.cancel();
-      }
+      if (window.speechSynthesis) window.speechSynthesis.cancel();
     }
 
-    function getPreferredVoice(lang) {
+    function getPreferredVoice(ttsLang) {
       const voices = window.speechSynthesis?.getVoices?.() ?? [];
       if (!voices.length) return null;
-
-      if (lang === 'jp') {
-        const jpExact = voices.find(v => v.lang?.toLowerCase().startsWith('ja-jp'));
-        if (jpExact) return jpExact;
-        const anyJa = voices.find(v => v.lang?.toLowerCase().startsWith('ja'));
-        if (anyJa) return anyJa;
-      } else {
-        const enUS = voices.find(v => v.lang?.toLowerCase().startsWith('en-us'));
-        if (enUS) return enUS;
-        const anyEn = voices.find(v => v.lang?.toLowerCase().startsWith('en'));
-        if (anyEn) return anyEn;
-      }
-      return voices[0] ?? null;
+      const exact = voices.find(v => v.lang?.toLowerCase() === ttsLang.toLowerCase());
+      if (exact) return exact;
+      const base = ttsLang.split('-')[0];
+      const anySame = voices.find(v => v.lang?.toLowerCase().startsWith(base.toLowerCase()));
+      return anySame || voices[0] || null;
     }
 
-    function speak(text, lang) {
+    function speak(text, ttsLang) {
       abortTTS();
-      if (!('speechSynthesis' in window)) {
-        console.warn('SpeechSynthesis not supported in this browser.');
-        return;
-      }
+      if (!('speechSynthesis' in window)) return;
       const utter = new SpeechSynthesisUtterance(text);
-      utter.lang = (lang === 'jp') ? 'ja-JP' : 'en-US';
-
+      utter.lang = ttsLang;
       const assignAndSpeak = () => {
-        const voice = getPreferredVoice(lang);
+        const voice = getPreferredVoice(ttsLang);
         if (voice) utter.voice = voice;
-        utter.rate   = 1.0;
-        utter.pitch  = 1.0;
-        utter.volume = 1.0;
         window.speechSynthesis.speak(utter);
       };
-
       const voices = window.speechSynthesis.getVoices();
       if (!voices || voices.length === 0) {
         const once = () => {
@@ -97,57 +101,100 @@
       }
     }
 
-    // --- English verse fetcher ---
-    async function fetchEN() {
-      const fn     = bibleQuotes[enMethods[0]];
-      const result = await fn();
-      enCurrentText = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
-      return enCurrentText;
-    }
+    function buildVersesFromOSIS(xmlDoc) {
+      const inline = Array.from(xmlDoc.getElementsByTagName('verse'))
+        .map(n => ({ id: n.getAttribute('osisID'), text: (n.textContent || '').trim() }))
+        .filter(v => v.id && v.text);
+      if (inline.length) return inline;
 
-    // --- Japanese loader & picker ---
-    async function loadJP() {
-      if (jpVerses.length) return;
-      const res     = await fetch(OSIS_URL);
-      const xmlText = await res.text();
-      const xmlDoc  = new DOMParser().parseFromString(xmlText, 'application/xml');
-      const nodes   = Array.from(xmlDoc.getElementsByTagName('verse'));
-      jpVerses = nodes
-        .map(n => ({ id: n.getAttribute('osisID'), text: n.textContent.trim() }))
+      const map = new Map();
+      const stack = [];
+      const walker = document.createTreeWalker(xmlDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+      const topId = () => (stack.length ? stack[stack.length - 1] : null);
+
+      let node = walker.currentNode;
+      while (node) {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          const el = node;
+          if (el.tagName?.toLowerCase() === 'verse') {
+            const sID = el.getAttribute('sID');
+            const eID = el.getAttribute('eID');
+            const osisID = el.getAttribute('osisID');
+            if (sID || osisID) {
+              const id = osisID || sID;
+              stack.push(id);
+              if (!map.has(id)) map.set(id, []);
+            }
+            if (eID) {
+              let popped;
+              do { popped = stack.pop(); } while (popped && popped !== eID && stack.length);
+            }
+          }
+        } else if (node.nodeType === Node.TEXT_NODE) {
+          const id = topId();
+          if (id) {
+            const t = node.nodeValue.replace(/\s+/g, ' ');
+            if (t.trim()) map.get(id).push(t);
+          }
+        }
+        node = walker.nextNode();
+      }
+
+      return Array.from(map.entries())
+        .map(([id, chunks]) => ({ id, text: chunks.join('').replace(/\s+/g, ' ').trim() }))
         .filter(v => v.id && v.text);
     }
-    function pickJP() {
-      const idx = Math.floor(Math.random() * jpVerses.length);
-      return jpVerses[idx];
+
+    async function loadVerses(lang) {
+      if (versesCache[lang]?.length) return;
+      const { url } = SOURCES[lang];
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Failed to fetch ${lang} OSIS`);
+      const xmlText = await res.text();
+      const xmlDoc  = new DOMParser().parseFromString(xmlText, 'application/xml');
+      const verses = buildVersesFromOSIS(xmlDoc);
+      versesCache[lang] = verses;
     }
 
-    // --- Main handler ---
-    newVerseBtn.addEventListener('click', async () => {
-      const lang = langSelect.value;
-      verseEl.textContent = lang === 'jp' ? '読み込んでいます…' : 'Loading verse...';
+    function pickVerse(lang) {
+      const list = versesCache[lang] || [];
+      if (!list.length) return null;
+      const idx = Math.floor(Math.random() * list.length);
+      return list[idx];
+    }
 
+    function renderVerse(lang, verse) {
+      if (!verse) return;
+      const sep = lang === 'jp' ? '　' : ' — ';
+      verseEl.textContent = `${verse.id}${sep}${verse.text}`;
+      sourceEl.textContent = `Source: ${SOURCES[lang].label}`;
+    }
+
+    async function handleNewVerse() {
+      const lang = langSelect.value;
+      const { ttsLang, loading, error } = SOURCES[lang];
+      verseEl.textContent = loading;
+      sourceEl.textContent = '';
       try {
-        if (lang === 'jp') {
-          await loadJP();
-          if (!jpVerses.length) throw new Error('No Japanese verses');
-          const { id, text } = pickJP();
-          verseEl.textContent = `${id}　${text}`;
-          speak(text, 'jp');
-        } else {
-          const text = await fetchEN();
-          verseEl.textContent = text;
-          speak(text, 'en');
-        }
-      } catch (err) {
-        console.error(err);
-        verseEl.textContent = lang === 'jp'
-          ? '読み込みエラーが発生しました'
-          : 'Failed to load verse.';
+        await loadVerses(lang);
+        const picked = pickVerse(lang);
+        if (!picked) throw new Error('No verses found');
+        renderVerse(lang, picked);
+        speak(picked.text, ttsLang);
+      } catch (e) {
+        console.error(e);
+        verseEl.textContent = error;
       }
+    }
+
+    newVerseBtn.addEventListener('click', handleNewVerse);
+    stopBtn.addEventListener('click', abortTTS);
+    langSelect.addEventListener('change', () => {
+      abortTTS();
+      handleNewVerse();
     });
 
-    // Initial call
-    newVerseBtn.click();
+    handleNewVerse();
   </script>
 </body>
 </html>
