@@ -25,6 +25,33 @@
       </div>
     </div>
 
+    <!-- NEW: Verse Selection UI -->
+    <div class="card mb-3">
+      <div class="card-body d-flex flex-wrap align-items-end gap-2">
+        <div>
+          <label for="book-select" class="form-label mb-1">Book</label>
+          <select id="book-select" class="form-select" disabled></select>
+        </div>
+        <div>
+          <label for="chapter-select" class="form-label mb-1">Chapter</label>
+          <select id="chapter-select" class="form-select" disabled></select>
+        </div>
+        <div>
+          <label for="verse-select" class="form-label mb-1">Verse</label>
+          <select id="verse-select" class="form-select" disabled></select>
+        </div>
+        <button id="go-verse" class="btn btn-success" disabled>Read Selected</button>
+
+        <div class="ms-auto d-flex align-items-end gap-2 flex-grow-1" style="min-width:280px">
+          <div class="flex-grow-1">
+            <label for="ref-input" class="form-label mb-1">Reference (e.g., John 3:16 / 創世記 1:1)</label>
+            <input id="ref-input" class="form-control" placeholder="Book Chapter:Verse" />
+          </div>
+          <button id="go-ref" class="btn btn-outline-primary">Go</button>
+        </div>
+      </div>
+    </div>
+
     <p id="verse" class="lead">Choose an edition and press "Get New Verse"</p>
     <small id="source" class="text-muted d-block"></small>
   </div>
@@ -53,7 +80,17 @@
     const stopBtn   = document.getElementById('stop-tts');
     const langSelect= document.getElementById('lang-select');
 
+    // NEW: Selectors + controls
+    const bookSelect    = document.getElementById('book-select');
+    const chapterSelect = document.getElementById('chapter-select');
+    const verseSelect   = document.getElementById('verse-select');
+    const goVerseBtn    = document.getElementById('go-verse');
+    const refInput      = document.getElementById('ref-input');
+    const goRefBtn      = document.getElementById('go-ref');
+
     const versesCache = { 'en-kjv': [], jp: [] };
+    // NEW: Index of verses for structured selection
+    const indexCache  = { 'en-kjv': null, jp: null };
     let currentOsisId = null;
 
     function abortTTS(){ if(window.speechSynthesis) window.speechSynthesis.cancel(); }
@@ -114,7 +151,7 @@
       versesCache[lang]=verses;
     }
 
-    const normalizeOsis = (id) => id?.split('!')[0] || id;
+    const normalizeOsis = (id) => id?.split('!')[0]?.split('-')[0] || id;
     function getById(lang,osisId){
       const list = versesCache[lang] || [];
       let v = list.find(v=>v.id===osisId);
@@ -125,7 +162,7 @@
 
     function pickRandom(lang){ const list=versesCache[lang]||[]; if(!list.length) return null; return list[Math.floor(Math.random()*list.length)]; }
 
-    function render(lang,verse){ if(!verse) return; const sep=lang==='jp'?'　':' — '; verseEl.textContent=`${verse.id}${sep}${verse.text}`; sourceEl.textContent=`Source: ${SOURCES[lang].label}`; }
+    function render(lang,verse){ if(!verse) return; const sep=lang==='jp'?'　':' — '; verseEl.textContent=`${normalizeOsis(verse.id)}${sep}${verse.text}`; sourceEl.textContent=`Source: ${SOURCES[lang].label}`; }
 
     async function showSameVerseIn(lang){
       const {ttsLang,loading,error}=SOURCES[lang];
@@ -133,11 +170,14 @@
       sourceEl.textContent='';
       try{
         await loadVerses(lang);
+        await ensureIndex(lang); // keep selectors in sync
         if(!currentOsisId){ verseEl.textContent='Pick "Get New Verse" first.'; return; }
         const verse = getById(lang,currentOsisId);
         if(!verse){ verseEl.textContent = 'This verse is not available in the selected edition.'; return; }
         render(lang,verse);
         speak(verse.text,ttsLang);
+        // also move selectors to this verse if present
+        selectControlsToOsis(lang, normalizeOsis(verse.id));
       }catch(e){ console.error(e); verseEl.textContent=error; }
     }
 
@@ -148,17 +188,224 @@
       sourceEl.textContent='';
       try{
         await loadVerses(lang);
+        await ensureIndex(lang);
         const verse=pickRandom(lang);
         if(!verse) throw new Error('No verses found');
-        currentOsisId=verse.id;
+        currentOsisId=normalizeOsis(verse.id);
         render(lang,verse);
         speak(verse.text,ttsLang);
+        selectControlsToOsis(lang, currentOsisId);
       }catch(e){ console.error(e); verseEl.textContent=error; }
     }
 
-    randomBtn.addEventListener('click',newRandomVerse);
-    stopBtn.addEventListener('click',abortTTS);
-    langSelect.addEventListener('change',()=>{ abortTTS(); if(currentOsisId){ showSameVerseIn(langSelect.value); } });
+    /***** NEW: Structured index + selectors *****/
+    async function ensureIndex(lang){
+      if(indexCache[lang]) return;
+      const list = versesCache[lang] || [];
+      const idx = {
+        booksOrder: [],
+        books: {} // book -> { chaptersOrder: [], chapters: { [ch]: { versesOrder: [], verses: { [v]: osisId }}}}
+      };
+
+      for(const v of list){
+        const base = normalizeOsis(v.id);
+        const parts = base.split('.');
+        if(parts.length < 3) continue;
+        const [book, ch, vs] = parts;
+        if(!idx.books[book]){
+          idx.books[book] = { chaptersOrder: [], chapters: {} };
+          idx.booksOrder.push(book);
+        }
+        const b = idx.books[book];
+        if(!b.chapters[ch]){
+          b.chapters[ch] = { versesOrder: [], verses: {} };
+          b.chaptersOrder.push(ch);
+        }
+        const c = b.chapters[ch];
+        if(!c.verses[vs]){
+          c.verses[vs] = base; // store the OSIS id
+          c.versesOrder.push(vs);
+        }
+      }
+      // sort natural numeric for chapters/verses, keep books as appearing in file
+      for(const book of idx.booksOrder){
+        const b = idx.books[book];
+        b.chaptersOrder.sort((a,b)=>Number(a)-Number(b));
+        for(const ch of b.chaptersOrder){
+          const c = b.chapters[ch];
+          c.versesOrder.sort((a,b)=>Number(a)-Number(b));
+        }
+      }
+      indexCache[lang] = idx;
+      populateBookSelect(lang);
+    }
+
+    function populateBookSelect(lang){
+      const idx = indexCache[lang];
+      enableSelectors(false);
+      bookSelect.innerHTML = '';
+      for(const book of idx.booksOrder){
+        const opt = document.createElement('option');
+        opt.value = book;
+        opt.textContent = book; // show OSIS book key; avoids translation mismatch
+        bookSelect.appendChild(opt);
+      }
+      bookSelect.disabled = false;
+      chapterSelect.disabled = true;
+      verseSelect.disabled = true;
+      goVerseBtn.disabled = true;
+      // If we already have a current verse, sync to it
+      if(currentOsisId) selectControlsToOsis(lang, currentOsisId);
+    }
+
+    function populateChapterSelect(lang, book){
+      const idx = indexCache[lang];
+      const b = idx.books[book];
+      chapterSelect.innerHTML = '';
+      if(!b){ chapterSelect.disabled=true; verseSelect.disabled=true; goVerseBtn.disabled=true; return; }
+      for(const ch of b.chaptersOrder){
+        const opt = document.createElement('option');
+        opt.value = ch;
+        opt.textContent = ch;
+        chapterSelect.appendChild(opt);
+      }
+      chapterSelect.disabled = false;
+      populateVerseSelect(lang, book, chapterSelect.value);
+    }
+
+    function populateVerseSelect(lang, book, ch){
+      const idx = indexCache[lang];
+      const c = idx.books[book]?.chapters[ch];
+      verseSelect.innerHTML = '';
+      if(!c){ verseSelect.disabled=true; goVerseBtn.disabled=true; return; }
+      for(const vs of c.versesOrder){
+        const opt = document.createElement('option');
+        opt.value = vs;
+        opt.textContent = vs;
+        verseSelect.appendChild(opt);
+      }
+      verseSelect.disabled = false;
+      goVerseBtn.disabled = false;
+    }
+
+    function enableSelectors(on){
+      bookSelect.disabled = !on;
+      chapterSelect.disabled = !on;
+      verseSelect.disabled = !on;
+      goVerseBtn.disabled = !on;
+    }
+
+    function selectControlsToOsis(lang, osis){
+      const parts = normalizeOsis(osis).split('.');
+      if(parts.length<3) return;
+      const [book, ch, vs] = parts;
+      const idx = indexCache[lang];
+      if(!idx?.books[book]) return;
+      // set values if present; fallback to first
+      bookSelect.value = book;
+      populateChapterSelect(lang, book);
+      if(idx.books[book].chapters[ch]){
+        chapterSelect.value = ch;
+        populateVerseSelect(lang, book, ch);
+        if(idx.books[book].chapters[ch].verses[vs]){
+          verseSelect.value = vs;
+        }
+      }
+    }
+
+    function readSelected(){
+      const lang = langSelect.value;
+      const {ttsLang} = SOURCES[lang];
+      const book = bookSelect.value;
+      const ch   = chapterSelect.value;
+      const vs   = verseSelect.value;
+      const idx = indexCache[lang];
+      const osis = idx?.books[book]?.chapters[ch]?.verses[vs];
+      if(!osis) return;
+      const verse = getById(lang, osis);
+      if(!verse) return;
+      currentOsisId = normalizeOsis(osis);
+      render(lang, verse);
+      speak(verse.text, ttsLang);
+    }
+
+    // Simple reference parser: tries to match book key as it appears in OSIS (e.g., John, Gen, 1John, 2Kgs)
+    function parseReferenceInput(text, lang){
+      if(!text) return null;
+      const raw = text.trim();
+      // Replace full-width colon if typed in JP, allow spaces like "1 John 3:16"
+      const cleaned = raw.replace('：',':').replace(/\s+/g,' ').trim();
+      const m = cleaned.match(/^(.+?)\s+(\d+)\s*[:.]\s*(\d+)$/i);
+      if(!m) return null;
+      let bookIn = m[1].trim();
+      const ch = m[2], vs = m[3];
+      // Normalize e.g., "1 John" -> "1John"
+      bookIn = bookIn.replace(/^\s*([1-3])\s+/,'$1');
+      // Try direct match (case-insensitive) against OSIS book keys present in this edition
+      const idx = indexCache[lang];
+      const candidates = idx?.booksOrder ?? [];
+      // exact (case-insensitive)
+      let book = candidates.find(b => b.toLowerCase() === bookIn.toLowerCase());
+      if(!book){
+        // startsWith (helps "Song" vs "SongOfSol" variations won’t match but attempts leniency)
+        book = candidates.find(b => b.toLowerCase().startsWith(bookIn.toLowerCase()));
+      }
+      if(!book){
+        // remove spaces from input for things like "1 Sam" -> "1Sam"
+        const compact = bookIn.replace(/\s+/g,'');
+        book = candidates.find(b => b.toLowerCase() === compact.toLowerCase()) ||
+               candidates.find(b => b.toLowerCase().startsWith(compact.toLowerCase()));
+      }
+      if(!book) return null;
+      const osis = `${book}.${Number(ch)}.${Number(vs)}`;
+      return osis;
+    }
+
+    async function goToReference(){
+      const lang = langSelect.value;
+      const {ttsLang, loading, error} = SOURCES[lang];
+      verseEl.textContent = loading;
+      sourceEl.textContent = '';
+      try{
+        await loadVerses(lang);
+        await ensureIndex(lang);
+        const osis = parseReferenceInput(refInput.value, lang);
+        if(!osis){ verseEl.textContent = (lang==='jp'?'参照の形式に誤りがあります。例: ヨハネ 3:16':'Could not parse reference. Try e.g., "John 3:16".'); return; }
+        const verse = getById(lang, osis);
+        if(!verse){ verseEl.textContent = (lang==='jp'?'この版ではその箇所が見つかりませんでした。':'That verse was not found in this edition.'); return; }
+        currentOsisId = normalizeOsis(osis);
+        render(lang, verse);
+        speak(verse.text, ttsLang);
+        selectControlsToOsis(lang, currentOsisId);
+      }catch(e){ console.error(e); verseEl.textContent = error; }
+    }
+
+    // Event wiring
+    randomBtn.addEventListener('click', newRandomVerse);
+    stopBtn.addEventListener('click', abortTTS);
+    langSelect.addEventListener('change', ()=>{ 
+      abortTTS(); 
+      // reset UI for new language
+      if(versesCache[langSelect.value]?.length){
+        indexCache[langSelect.value] = null; // rebuild on demand to keep simple
+      }
+      ensureIndex(langSelect.value).then(()=>{
+        if(currentOsisId){ showSameVerseIn(langSelect.value); }
+        else {
+          // enable selectors even without current verse
+          enableSelectors(true);
+        }
+      }).catch(console.error);
+    });
+
+    bookSelect.addEventListener('change', ()=> populateChapterSelect(langSelect.value, bookSelect.value));
+    chapterSelect.addEventListener('change', ()=> populateVerseSelect(langSelect.value, bookSelect.value, chapterSelect.value));
+    goVerseBtn.addEventListener('click', readSelected);
+    goRefBtn.addEventListener('click', goToReference);
+
+    // Lazy-initialize selectors for the default edition on first interaction
+    // (or you can uncomment the following line to prebuild immediately)
+    // ensureIndex(langSelect.value).catch(console.error);
   </script>
 </body>
 </html>
