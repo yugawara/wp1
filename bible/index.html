@@ -5,30 +5,28 @@
   <meta http-equiv="X-UA-Compatible" content="IE=edge" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Bible Reader with TTS</title>
-  <link
-    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
-    rel="stylesheet"
-  />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
 </head>
 <body>
   <div class="container py-5">
     <h1 class="mb-4">Bible Reader</h1>
 
-    <div class="d-flex align-items-center gap-3 mb-3">
+    <div class="d-flex align-items-end gap-3 mb-3 flex-wrap">
       <div>
-        <label for="lang-select" class="form-label">Language:</label>
+        <label for="lang-select" class="form-label">Edition:</label>
         <select id="lang-select" class="form-select w-auto d-inline-block">
           <option value="en-kjv" selected>English (KJV)</option>
-          <option value="en-oeb">English (OEB)</option>
           <option value="jp">日本語（口語訳）</option>
         </select>
       </div>
-      <button id="new-verse" class="btn btn-primary">New Verse</button>
-      <button id="stop-tts" class="btn btn-outline-secondary">Stop TTS</button>
+      <div class="d-flex gap-2">
+        <button id="random-verse" class="btn btn-primary">Get New Verse</button>
+        <button id="stop-tts" class="btn btn-outline-secondary">Stop TTS</button>
+      </div>
     </div>
 
-    <p id="verse" class="lead">Loading verse...</p>
-    <small id="source" class="text-muted"></small>
+    <p id="verse" class="lead">Choose an edition and press "Get New Verse"</p>
+    <small id="source" class="text-muted d-block"></small>
   </div>
 
   <script type="module" defer>
@@ -40,13 +38,6 @@
         error: 'Failed to load verse.',
         label: 'King James Version (KJV)'
       },
-      'en-oeb': {
-        url: 'https://raw.githubusercontent.com/seven1m/open-bibles/master/eng-us-oeb.osis.xml',
-        ttsLang: 'en-US',
-        loading: 'Loading verse...',
-        error: 'Failed to load verse.',
-        label: 'Open English Bible (OEB)'
-      },
       jp: {
         url: 'https://raw.githubusercontent.com/seven1m/open-bibles/master/jpn-kougo.osis.xml',
         ttsLang: 'ja-JP',
@@ -56,145 +47,118 @@
       }
     };
 
-    const verseEl     = document.getElementById('verse');
-    const sourceEl    = document.getElementById('source');
-    const newVerseBtn = document.getElementById('new-verse');
-    const stopBtn     = document.getElementById('stop-tts');
-    const langSelect  = document.getElementById('lang-select');
+    const verseEl   = document.getElementById('verse');
+    const sourceEl  = document.getElementById('source');
+    const randomBtn = document.getElementById('random-verse');
+    const stopBtn   = document.getElementById('stop-tts');
+    const langSelect= document.getElementById('lang-select');
 
-    const versesCache = { 'en-kjv': [], 'en-oeb': [], jp: [] };
+    const versesCache = { 'en-kjv': [], jp: [] };
+    let currentOsisId = null;
 
-    function abortTTS() {
-      if (window.speechSynthesis) window.speechSynthesis.cancel();
-    }
-
-    function getPreferredVoice(ttsLang) {
+    function abortTTS(){ if(window.speechSynthesis) window.speechSynthesis.cancel(); }
+    function getPreferredVoice(ttsLang){
       const voices = window.speechSynthesis?.getVoices?.() ?? [];
-      if (!voices.length) return null;
+      if(!voices.length) return null;
       const exact = voices.find(v => v.lang?.toLowerCase() === ttsLang.toLowerCase());
-      if (exact) return exact;
+      if(exact) return exact;
       const base = ttsLang.split('-')[0];
       const anySame = voices.find(v => v.lang?.toLowerCase().startsWith(base.toLowerCase()));
       return anySame || voices[0] || null;
     }
-
-    function speak(text, ttsLang) {
+    function speak(text,ttsLang){
       abortTTS();
-      if (!('speechSynthesis' in window)) return;
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.lang = ttsLang;
-      const assignAndSpeak = () => {
-        const voice = getPreferredVoice(ttsLang);
-        if (voice) utter.voice = voice;
-        window.speechSynthesis.speak(utter);
-      };
-      const voices = window.speechSynthesis.getVoices();
-      if (!voices || voices.length === 0) {
-        const once = () => {
-          window.speechSynthesis.removeEventListener('voiceschanged', once);
-          assignAndSpeak();
-        };
-        window.speechSynthesis.addEventListener('voiceschanged', once);
-        window.speechSynthesis.getVoices();
-      } else {
-        assignAndSpeak();
-      }
+      if(!('speechSynthesis' in window)) return;
+      const utter=new SpeechSynthesisUtterance(text);
+      utter.lang=ttsLang;
+      const assignAndSpeak=()=>{ const voice=getPreferredVoice(ttsLang); if(voice) utter.voice=voice; window.speechSynthesis.speak(utter); };
+      const voices=window.speechSynthesis.getVoices();
+      if(!voices||voices.length===0){ const once=()=>{window.speechSynthesis.removeEventListener('voiceschanged',once); assignAndSpeak();}; window.speechSynthesis.addEventListener('voiceschanged',once); window.speechSynthesis.getVoices(); } else { assignAndSpeak(); }
     }
 
-    function buildVersesFromOSIS(xmlDoc) {
-      const inline = Array.from(xmlDoc.getElementsByTagName('verse'))
-        .map(n => ({ id: n.getAttribute('osisID'), text: (n.textContent || '').trim() }))
-        .filter(v => v.id && v.text);
-      if (inline.length) return inline;
-
-      const map = new Map();
-      const stack = [];
-      const walker = document.createTreeWalker(xmlDoc, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
-      const topId = () => (stack.length ? stack[stack.length - 1] : null);
-
-      let node = walker.currentNode;
-      while (node) {
-        if (node.nodeType === Node.ELEMENT_NODE) {
-          const el = node;
-          if (el.tagName?.toLowerCase() === 'verse') {
-            const sID = el.getAttribute('sID');
-            const eID = el.getAttribute('eID');
-            const osisID = el.getAttribute('osisID');
-            if (sID || osisID) {
-              const id = osisID || sID;
-              stack.push(id);
-              if (!map.has(id)) map.set(id, []);
-            }
-            if (eID) {
-              let popped;
-              do { popped = stack.pop(); } while (popped && popped !== eID && stack.length);
-            }
+    function buildVersesFromOSIS(xmlDoc){
+      const inline=Array.from(xmlDoc.getElementsByTagName('verse')).map(n=>({id:n.getAttribute('osisID'),text:(n.textContent||'').trim()})).filter(v=>v.id&&v.text);
+      if(inline.length) return inline;
+      const map=new Map();
+      const stack=[];
+      const walker=document.createTreeWalker(xmlDoc,NodeFilter.SHOW_ELEMENT|NodeFilter.SHOW_TEXT);
+      const topId=()=>stack.length?stack[stack.length-1]:null;
+      let node=walker.currentNode;
+      while(node){
+        if(node.nodeType===Node.ELEMENT_NODE){
+          const el=node;
+          if(el.tagName?.toLowerCase()==='verse'){
+            const sID=el.getAttribute('sID');
+            const eID=el.getAttribute('eID');
+            const osisID=el.getAttribute('osisID');
+            if(sID||osisID){ const id=osisID||sID; stack.push(id); if(!map.has(id)) map.set(id,[]); }
+            if(eID){ let popped; do{ popped=stack.pop(); }while(popped&&popped!==eID&&stack.length); }
           }
-        } else if (node.nodeType === Node.TEXT_NODE) {
-          const id = topId();
-          if (id) {
-            const t = node.nodeValue.replace(/\s+/g, ' ');
-            if (t.trim()) map.get(id).push(t);
-          }
+        } else if(node.nodeType===Node.TEXT_NODE){
+          const id=topId();
+          if(id){ const t=node.nodeValue.replace(/\s+/g,' '); if(t.trim()) map.get(id).push(t); }
         }
-        node = walker.nextNode();
+        node=walker.nextNode();
       }
-
-      return Array.from(map.entries())
-        .map(([id, chunks]) => ({ id, text: chunks.join('').replace(/\s+/g, ' ').trim() }))
-        .filter(v => v.id && v.text);
+      return Array.from(map.entries()).map(([id,chunks])=>({id,text:chunks.join('').replace(/\s+/g,' ').trim()})).filter(v=>v.id&&v.text);
     }
 
-    async function loadVerses(lang) {
-      if (versesCache[lang]?.length) return;
-      const { url } = SOURCES[lang];
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`Failed to fetch ${lang} OSIS`);
-      const xmlText = await res.text();
-      const xmlDoc  = new DOMParser().parseFromString(xmlText, 'application/xml');
-      const verses = buildVersesFromOSIS(xmlDoc);
-      versesCache[lang] = verses;
+    async function loadVerses(lang){
+      if(versesCache[lang]?.length) return;
+      const {url}=SOURCES[lang];
+      const res=await fetch(url);
+      if(!res.ok) throw new Error(`Failed to fetch ${lang} OSIS`);
+      const xmlText=await res.text();
+      const xmlDoc=new DOMParser().parseFromString(xmlText,'application/xml');
+      const verses=buildVersesFromOSIS(xmlDoc);
+      versesCache[lang]=verses;
     }
 
-    function pickVerse(lang) {
+    const normalizeOsis = (id) => id?.split('!')[0] || id;
+    function getById(lang,osisId){
       const list = versesCache[lang] || [];
-      if (!list.length) return null;
-      const idx = Math.floor(Math.random() * list.length);
-      return list[idx];
+      let v = list.find(v=>v.id===osisId);
+      if (v) return v;
+      const base = normalizeOsis(osisId);
+      return list.find(v=>normalizeOsis(v.id)===base) || null;
     }
 
-    function renderVerse(lang, verse) {
-      if (!verse) return;
-      const sep = lang === 'jp' ? '　' : ' — ';
-      verseEl.textContent = `${verse.id}${sep}${verse.text}`;
-      sourceEl.textContent = `Source: ${SOURCES[lang].label}`;
-    }
+    function pickRandom(lang){ const list=versesCache[lang]||[]; if(!list.length) return null; return list[Math.floor(Math.random()*list.length)]; }
 
-    async function handleNewVerse() {
-      const lang = langSelect.value;
-      const { ttsLang, loading, error } = SOURCES[lang];
-      verseEl.textContent = loading;
-      sourceEl.textContent = '';
-      try {
+    function render(lang,verse){ if(!verse) return; const sep=lang==='jp'?'　':' — '; verseEl.textContent=`${verse.id}${sep}${verse.text}`; sourceEl.textContent=`Source: ${SOURCES[lang].label}`; }
+
+    async function showSameVerseIn(lang){
+      const {ttsLang,loading,error}=SOURCES[lang];
+      verseEl.textContent=loading;
+      sourceEl.textContent='';
+      try{
         await loadVerses(lang);
-        const picked = pickVerse(lang);
-        if (!picked) throw new Error('No verses found');
-        renderVerse(lang, picked);
-        speak(picked.text, ttsLang);
-      } catch (e) {
-        console.error(e);
-        verseEl.textContent = error;
-      }
+        if(!currentOsisId){ verseEl.textContent='Pick "Get New Verse" first.'; return; }
+        const verse = getById(lang,currentOsisId);
+        if(!verse){ verseEl.textContent = 'This verse is not available in the selected edition.'; return; }
+        render(lang,verse);
+        speak(verse.text,ttsLang);
+      }catch(e){ console.error(e); verseEl.textContent=error; }
     }
 
-    newVerseBtn.addEventListener('click', handleNewVerse);
-    stopBtn.addEventListener('click', abortTTS);
-    langSelect.addEventListener('change', () => {
-      abortTTS();
-      handleNewVerse();
-    });
+    async function newRandomVerse(){
+      const lang=langSelect.value;
+      const {ttsLang,loading,error}=SOURCES[lang];
+      verseEl.textContent=loading;
+      sourceEl.textContent='';
+      try{
+        await loadVerses(lang);
+        const verse=pickRandom(lang);
+        if(!verse) throw new Error('No verses found');
+        currentOsisId=verse.id;
+        render(lang,verse);
+        speak(verse.text,ttsLang);
+      }catch(e){ console.error(e); verseEl.textContent=error; }
+    }
 
-    handleNewVerse();
+    randomBtn.addEventListener('click',newRandomVerse);
+    stopBtn.addEventListener('click',abortTTS);
+    langSelect.addEventListener('change',()=>{ abortTTS(); if(currentOsisId){ showSameVerseIn(langSelect.value); } });
   </script>
 </body>
 </html>
