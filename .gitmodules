@@ -1,4 +1,0 @@
-[submodule "wp/private"]
-	path = wp/private
-	url = git@github.com:tng-coop/wp-yasuaki-private.git
-	branch = main
