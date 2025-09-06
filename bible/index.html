@@ -6,9 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Bible Reader with TTS</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet" />
-  <style>
-    code.small { font-size:.85em }
-  </style>
+  <style>code.small{font-size:.85em}</style>
 </head>
 <body>
   <div class="container py-4">
@@ -22,7 +20,7 @@
       <div>
         <label for="lang-select" class="form-label">Edition:</label>
         <select id="lang-select" class="form-select w-auto d-inline-block">
-          <option value="en" selected>English (prefer eBible KJVD)</option>
+          <option value="en" selected>English (KJV — stable)</option>
           <option value="jp">日本語（口語訳）</option>
         </select>
       </div>
@@ -35,8 +33,8 @@
       <!-- Optional: manual override for English source -->
       <div class="ms-auto d-flex align-items-end gap-2" style="min-width:320px">
         <div class="flex-grow-1">
-          <label class="form-label mb-1" for="custom-en-url">Custom English OSIS URL (eBible)</label>
-          <input id="custom-en-url" class="form-control form-control-sm" placeholder="https://ebible.org/Scriptures/eng-... .osis.xml" />
+          <label class="form-label mb-1" for="custom-en-url">Custom English OSIS URL (optional)</label>
+          <input id="custom-en-url" class="form-control form-control-sm" placeholder="https://.../eng-... .osis.xml" />
         </div>
         <button id="use-custom-en" class="btn btn-sm btn-outline-secondary">Use</button>
       </div>
@@ -63,7 +61,7 @@
 
         <div class="ms-auto d-flex align-items-end gap-2 flex-grow-1" style="min-width:280px">
           <div class="flex-grow-1">
-            <label for="ref-input" class="form-label mb-1">Reference (e.g., Sirach 2:1 / ヨハネ 3:16)</label>
+            <label for="ref-input" class="form-label mb-1">Reference (e.g., John 3:16 / ヨハネ 3:16)</label>
             <input id="ref-input" class="form-control" placeholder="Book Chapter:Verse" />
           </div>
           <button id="go-ref" class="btn btn-outline-primary">Go</button>
@@ -89,26 +87,25 @@
   </div>
 
   <script type="module" defer>
-    // --- Candidate URLs ---
-    // These are the most common direct OSIS endpoints used on eBible.
-    // We probe with GET (not HEAD) because some origins reject HEAD.
-    const EBIBLE_CANDIDATES_KJVD = [
-      'https://ebible.org/Scriptures/eng-kjvd.osis.xml',
-      'https://ebible.org/Scriptures/eng-kjva.osis.xml',
-      'https://ebible.org/osis/eng-kjvd.osis.xml'
-    ];
-    const EBIBLE_KJV_OSIS = [
-      'https://ebible.org/Scriptures/eng-kjv.osis.xml',
-      'https://ebible.org/osis/eng-kjv.osis.xml'
-    ];
-    const LAST_RESORT_KJV = 'https://raw.githubusercontent.com/seven1m/open-bibles/master/eng-kjv.osis.xml';
-
+    // --- Stable defaults (no probing) ---
     const SOURCES = {
-      en: { url: null, ttsLang: 'en-US', loading: 'Loading verse...', error: 'Failed to load verse.', label: 'English (auto: eBible KJVD → KJV)' },
-      jp: { url: 'https://raw.githubusercontent.com/seven1m/open-bibles/master/jpn-kougo.osis.xml', ttsLang: 'ja-JP', loading: '読み込んでいます…', error: '読み込みエラーが発生しました', label: '口語訳聖書' }
+      en: { // GitHub KJV (works in-browser). You can override with the box on the right.
+        url: 'https://raw.githubusercontent.com/seven1m/open-bibles/master/eng-kjv.osis.xml',
+        ttsLang: 'en-US',
+        loading: 'Loading verse...',
+        error: 'Failed to load verse.',
+        label: 'King James Version (KJV)'
+      },
+      jp: {
+        url: 'https://raw.githubusercontent.com/seven1m/open-bibles/master/jpn-kougo.osis.xml',
+        ttsLang: 'ja-JP',
+        loading: '読み込んでいます…',
+        error: '読み込みエラーが発生しました',
+        label: '口語訳聖書'
+      }
     };
 
-    // Canonical OSIS order (73-book list; extras appear only if source has them)
+    // Canonical OSIS order (supports 73; extra books appear only if present)
     const OSIS_BOOKS = [
       'Gen','Exod','Lev','Num','Deut','Josh','Judg','Ruth','1Sam','2Sam','1Kgs','2Kgs','1Chr','2Chr','Ezra','Neh','Tob','Jdt','Esth','1Macc','2Macc',
       'Job','Ps','Prov','Eccl','Song','Wis','Sir','Isa','Jer','Lam','Bar','EpJer','Ezek','Dan','Hos','Joel','Amos','Obad','Jonah','Mic','Nah','Hab','Zeph','Hag','Zech','Mal',
@@ -116,7 +113,7 @@
       'Sus','Bel','PrAzar','SgThree'
     ];
 
-    // --- DOM ---
+    // DOM
     const verseEl   = document.getElementById('verse');
     const sourceEl  = document.getElementById('source');
     const statusEl  = document.getElementById('status');
@@ -137,16 +134,15 @@
     const customEnInput = document.getElementById('custom-en-url');
     const useCustomBtn  = document.getElementById('use-custom-en');
 
-    // --- State ---
+    // State
     const versesCache = { en: [], jp: [] };
     const indexCache  = { en: null, jp: null };
     let currentOsisId = null;
     let autoOn=false, autoPaused=false, currentUtterance=null;
 
-    // --- Helpers ---
+    // Helpers
     const normalizeOsis = id => id?.split('!')[0]?.split('-')[0] || id;
     const showStatus = t => statusEl.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>${t}`;
-    const warnStatus = t => statusEl.innerHTML = `<span class="text-warning">⚠</span> ${t}`;
     const errorStatus= t => statusEl.innerHTML = `<span class="text-danger">✖</span> ${t}`;
     const clearStatus= () => statusEl.textContent='';
 
@@ -156,44 +152,7 @@
       bookSelect.disabled=!on; chapterSelect.disabled=!on; verseSelect.disabled=!on;
     }
 
-    // --- Choose best English URL (GET probe) ---
-    async function resolveEnglishURL(){
-      // custom override
-      const u = (customEnInput.value||'').trim();
-      if (u) return u;
-
-      const tryList = async (lst) => {
-        for (const url of lst) {
-          try {
-            // Some hosts reject HEAD; do a lightweight GET
-            const res = await fetch(url, { method:'GET', cache:'no-store', redirect:'follow' });
-            if (res.ok) {
-              const ct = (res.headers.get('content-type')||'').toLowerCase();
-              // Simple sanity: expect xml and non-trivial length
-              const text = await res.text();
-              if (ct.includes('xml') && text.length > 2000) {
-                return url;
-              }
-            }
-          } catch(_) {}
-        }
-        return null;
-      };
-
-      let found = await tryList(EBIBLE_CANDIDATES_KJVD);
-      if (found) return found;
-
-      found = await tryList(EBIBLE_KJV_OSIS);
-      if (found) {
-        warnStatus('KJVD not found at eBible; using KJV from eBible.');
-        return found;
-      }
-
-      warnStatus('eBible OSIS not reachable; falling back to GitHub KJV.');
-      return LAST_RESORT_KJV;
-    }
-
-    // --- TTS ---
+    // TTS
     function cancelOnly(){ if(window.speechSynthesis) window.speechSynthesis.cancel(); currentUtterance=null; }
     function abortTTS(){ cancelOnly(); autoOn=false; autoPaused=false; updateAutoUI(); }
     function speak(text,ttsLang,{onend}={}){
@@ -205,7 +164,7 @@
       const v=window.speechSynthesis.getVoices(); if(!v||!v.length){ const once=()=>{window.speechSynthesis.removeEventListener('voiceschanged',once); go();}; window.speechSynthesis.addEventListener('voiceschanged',once); window.speechSynthesis.getVoices(); } else go();
     }
 
-    // --- OSIS parsing ---
+    // OSIS parsing
     function buildVersesFromOSIS(xmlDoc){
       const inline = Array.from(xmlDoc.getElementsByTagName('verse')).map(n=>({id:n.getAttribute('osisID'), text:(n.textContent||'').trim()})).filter(v=>v.id&&v.text);
       if(inline.length) return inline;
@@ -227,12 +186,10 @@
       return Array.from(map.entries()).map(([id,chunks])=>({id,text:chunks.join('').replace(/\s+/g,' ').trim()})).filter(v=>v.id&&v.text);
     }
 
-    // --- Load + cache ---
     async function loadVerses(lang){
       if(versesCache[lang]?.length) return;
       showStatus(SOURCES[lang].loading);
       try{
-        if(lang==='en' && !SOURCES.en.url) SOURCES.en.url = await resolveEnglishURL();
         const res=await fetch(SOURCES[lang].url, { cache:'no-store', redirect:'follow' });
         if(!res.ok) throw new Error(`HTTP ${res.status}`);
         const xmlText=await res.text();
@@ -251,7 +208,6 @@
       return list.find(v => normalizeOsis(v.id)===base) || null;
     }
 
-    // --- Index + selects ---
     async function ensureIndex(lang){
       if(indexCache[lang]) return;
       showStatus(lang==='jp'?'インデックス作成中…':'Building index…');
@@ -300,7 +256,6 @@
       verseSelect.selectedIndex=0; enableAutoControls(true);
     }
 
-    // --- Render + actions ---
     function render(lang,verse){
       if(!verse) return;
       const sep = (lang==='jp') ? '　' : ' — ';
@@ -390,7 +345,7 @@
         await initSelectors(lang);
         const cleaned = refInput.value.trim().replace('：',':').replace(/\s+/g,' ');
         const m = cleaned.match(/^(.+?)\s+(\d+)\s*[:.]\s*(\d+)$/i);
-        if(!m){ verseEl.textContent = (lang==='jp'?'参照の形式に誤りがあります。例: ヨハネ 3:16':'Could not parse reference. Try e.g., "Sirach 2:1".'); return; }
+        if(!m){ verseEl.textContent = (lang==='jp'?'参照の形式に誤りがあります。例: ヨハネ 3:16':'Could not parse reference. Try e.g., "John 3:16".'); return; }
         const [_, book, ch, vs] = m;
         const idx=indexCache[lang];
         if(!idx.books[book] || !idx.books[book].chapters[ch] || !idx.books[book].chapters[ch].verses[vs]){
@@ -416,25 +371,23 @@
       abortTTS(); indexCache[langSelect.value]=null;
       try{ await initSelectors(langSelect.value); enableAutoControls(true);}catch(e){ console.error(e); errorStatus(SOURCES[langSelect.value].error); }
     });
-    useCustomBtn.addEventListener('click', async ()=>{
-      if(!customEnInput.value.trim()) return;
-      SOURCES.en.url = null; // force re-resolve (will prefer custom)
-      abortTTS(); indexCache.en=null; versesCache.en=[];
+    document.getElementById('use-custom-en').addEventListener('click', async ()=>{
+      const u=(customEnInput.value||'').trim(); if(!u) return;
+      SOURCES.en.url=u; abortTTS(); indexCache.en=null; versesCache.en=[];
       langSelect.value='en';
       await initSelectors('en');
       enableAutoControls(true);
+      sourceEl.textContent=`Source: Custom English OSIS`;
     });
     rateInput.addEventListener('input', ()=>{ rateVal.textContent = `${Number(rateInput.value).toFixed(1)}×`; });
     autoBtn.addEventListener('click', toggleAuto);
     autoPauseBtn.addEventListener('click', togglePause);
 
-    // Bootstrap
+    // First-load bootstrap
     (async () => {
       try { await initSelectors(langSelect.value); enableAutoControls(true); }
       catch (e) { console.error(e); errorStatus(SOURCES[langSelect.value].error); }
-      if ('speechSynthesis' in window) {
-        try { window.speechSynthesis.getVoices(); setTimeout(()=>window.speechSynthesis.getVoices(), 0); } catch {}
-      }
+      if ('speechSynthesis' in window) { try { window.speechSynthesis.getVoices(); setTimeout(()=>window.speechSynthesis.getVoices(), 0); } catch {} }
     })();
   </script>
 </body>
