@@ -1,0 +1,2 @@
+/* Frontend: don’t show the in-editor pane labels */
+.hw-pane-label { display: none; }

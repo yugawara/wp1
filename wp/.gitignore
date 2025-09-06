@@ -1,0 +1,27 @@
+# --- WordPress core ---
+/wp-admin/
+/wp-includes/
+/wp-*.php
+/index.php
+/license.txt
+/readme.html
+/xmlrpc.php
+
+# --- Runtime uploads & caches ---
+wp-content/uploads/
+wp-content/upgrade/
+wp-content/cache/
+wp-content/wflogs/
+wp-content/db.php
+wp-content/languages/
+
+# --- Plugins: ignore everything, use symlinks ---
+wp-content/plugins/*
+
+# --- Themes: ignore everything except your theme ---
+wp-content/themes/*
+!wp-content/themes/your-theme-slug/
+!wp-content/themes/your-theme-slug/**
+
+# --- MU-plugins: keep tracked (no ignores) ---
+# (left blank so all mu-plugins are included)

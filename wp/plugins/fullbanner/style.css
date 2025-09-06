@@ -1,0 +1,34 @@
+.fullbanner {
+  position: relative;
+  width: 100%;
+  display: block;
+  overflow: hidden; /* clip to attribute height */
+}
+
+.fullbanner .pane.a {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.fullbanner .overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* left-anchored, vertically centered scaler target */
+.fullbanner .overlay-inner {
+  position: absolute;
+  left: 20px;                         /* respect leftmost edge */
+  top: 50%;
+  transform: translateY(-50%);     /* no X translation */
+  transform-origin: left center;   /* scale from left edge */
+  display: inline-block;           /* shrink-wrap for measurement */
+  pointer-events: auto;
+  max-width: none;
+}
+
+.fullbanner .overlay-inner > * { margin: 0; }
