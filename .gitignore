@@ -1,3 +1,7 @@
+.maintenance
+.user.ini
+.well-known/
+
 # ignore the wp-content directory index stub
 /wp-content/index.php
 
