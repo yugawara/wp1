@@ -4,7 +4,7 @@
  * Description: Enables Google and GitHub OAuth login & registration on WP login screens,
  *              styled with Bootstrap via esm.sh and custom brand colors, with HEREDOC
  *              separators. Includes enhanced error handling and account linking.
- * Version:     1.8.0
+ * Version:     1.9.0
  * Author:      Your Name
  */
 
@@ -80,10 +80,10 @@ function sol_make_pkce(): array {
 }
 
 /**
- * Create a per-request state payload and persist a short-lived marker so we can validate.
- * We include: provider, ts, nonce, and store the PKCE verifier server-side keyed by state hash.
+ * Create per-request state + nonce, persist a short-lived record so we can validate.
+ * Returns [state, nonce].
  */
-function sol_make_state(string $provider, string $pkce_verifier): string {
+function sol_make_state(string $provider, string $pkce_verifier): array {
     $nonce = bin2hex(random_bytes(16));
     $state_payload = [
         'p'     => $provider,
@@ -99,10 +99,10 @@ function sol_make_state(string $provider, string $pkce_verifier): string {
         'nonce'    => $nonce,
     ], 10 * MINUTE_IN_SECONDS);
 
-    return $state;
+    return [$state, $nonce];
 }
 
-function sol_consume_state_and_verifier(string $state) {
+function sol_consume_state_record(string $state) {
     $key = 'sol_state_' . md5($state);
     $record = get_transient($key);
     if ($record) {
@@ -135,7 +135,7 @@ add_filter('login_message', function ($message) {
 });
 
 // -----------------------------------------------------------------------------
-// BUILD OAUTH URL (login screen) — PKCE + randomized state for BOTH providers
+// BUILD OAUTH URL (login screen) — PKCE + randomized state + NONCE for BOTH
 // -----------------------------------------------------------------------------
 function sol_get_oauth_url($provider) {
     $creds = sol_get_creds($provider);
@@ -149,7 +149,7 @@ function sol_get_oauth_url($provider) {
 
     if ($provider === 'google') {
         [$verifier, $challenge] = sol_make_pkce();
-        $state = sol_make_state('google', $verifier);
+        [$state, $nonce]        = sol_make_state('google', $verifier);
 
         $base   = 'https://accounts.google.com/o/oauth2/v2/auth';
         $params = [
@@ -158,22 +158,23 @@ function sol_get_oauth_url($provider) {
             'response_type'         => 'code',
             'scope'                 => 'openid email profile',
             'state'                 => $state,
+            'nonce'                 => $nonce,            // OIDC nonce
             'access_type'           => 'online',
             'prompt'                => 'consent',
             'code_challenge'        => $challenge,
             'code_challenge_method' => 'S256',
         ];
     } else {
-        // GitHub now also uses PKCE + randomized state
+        // GitHub: PKCE + randomized state (GitHub ignores nonce param)
         [$verifier, $challenge] = sol_make_pkce();
-        $state = sol_make_state('github', $verifier);
+        [$state, $nonce]        = sol_make_state('github', $verifier);
 
         $base   = 'https://github.com/login/oauth/authorize';
         $params = [
             'client_id'             => $creds['id'],
             'redirect_uri'          => SOL_OAUTH_REDIRECT_URI,
-            'scope'        => 'read:user user:email',
-            'state'        => $state,
+            'scope'                 => 'read:user user:email',
+            'state'                 => $state,
             'code_challenge'        => $challenge,
             'code_challenge_method' => 'S256',
         ];
@@ -226,14 +227,16 @@ function sol_handle_callback() {
     $raw_state = sanitize_text_field(wp_unslash($_GET['state']));
     $code      = sanitize_text_field(wp_unslash($_GET['code']));
 
-    // Validate randomized state for both providers and recover PKCE verifier
-    $state_data = sol_consume_state_and_verifier($raw_state);
+    // Validate randomized state for both providers and recover PKCE verifier + nonce
+    $state_data = sol_consume_state_record($raw_state);
     $provider   = 'google'; // default assumption if state decoding fails
     $pkce_verifier = null;
+    $expected_nonce = null;
 
     if ($state_data) {
-        $provider = $state_data['provider'] ?? 'google';
-        $pkce_verifier = $state_data['verifier'] ?? null;
+        $provider       = $state_data['provider'] ?? 'google';
+        $pkce_verifier  = $state_data['verifier'] ?? null;
+        $expected_nonce = $state_data['nonce'] ?? null;
 
         // Optional freshness window (10 minutes)
         if (empty($state_data['ts']) || (time() - (int)$state_data['ts'] > 10 * MINUTE_IN_SECONDS)) {
@@ -250,16 +253,34 @@ function sol_handle_callback() {
     $creds = sol_require_creds_or_redirect($provider);
 
     // Exchange code for token(s); pass PKCE verifier for both providers
-    $token_or_tokens = sol_exchange_code_for_token($provider, $code, $creds, $pkce_verifier);
+    $token_resp = sol_exchange_code_for_token($provider, $code, $creds, $pkce_verifier);
 
-    // Expect an access token string (back-compat) or full array
-    $access_token = is_array($token_or_tokens) ? ($token_or_tokens['access_token'] ?? null) : $token_or_tokens;
+    // Access token (and maybe id_token) expected
+    $access_token = is_array($token_resp) ? ($token_resp['access_token'] ?? null) : $token_resp;
 
     if (!$access_token) {
         sol_log_login_attempt($provider, '', 'failure', 'no_token');
         error_log('Social OAuth Login: No token for ' . $provider);
         return;
     }
+
+    // ---------- Google: verify ID token & nonce, then cross-check sub ----------
+    if ($provider === 'google') {
+        $id_token = is_array($token_resp) ? ($token_resp['id_token'] ?? null) : null;
+        if (empty($id_token)) {
+            sol_log_login_attempt('google', '', 'failure', 'missing_id_token');
+            wp_safe_redirect(add_query_arg(['auth_error' => 'id_token_missing'], wp_login_url()));
+            exit;
+        }
+
+        $claims = sol_verify_google_id_token($id_token, $creds['id'], $expected_nonce);
+        if (is_wp_error($claims)) {
+            sol_log_login_attempt('google', '', 'failure', $claims->get_error_code());
+            wp_safe_redirect(add_query_arg(['auth_error' => $claims->get_error_code()], wp_login_url()));
+            exit;
+        }
+    }
+    // --------------------------------------------------------------------------
 
     $profile = sol_fetch_user_profile($provider, $access_token);
     error_log('Social OAuth Login: Retrieved profile for ' . $provider);
@@ -269,15 +290,21 @@ function sol_handle_callback() {
         $profile->id = $profile->sub;
     }
 
-    // ----------- Verified email enforcement -----------
+    // Verified email enforcement
     if ($provider === 'google') {
-        // Require presence of email AND that it's verified
-        $email_present   = isset($profile->email) && $profile->email;
-        $email_verified  = isset($profile->email_verified) ? (bool)$profile->email_verified : false;
+        $email_present  = isset($profile->email) && $profile->email;
+        $email_verified = isset($profile->email_verified) ? (bool)$profile->email_verified : false;
         if (!$email_present || !$email_verified) {
             sol_log_login_attempt('google', $profile->email ?? '', 'failure', $email_present ? 'email_unverified' : 'email_required');
             $err = $email_present ? 'email_unverified' : 'email_required';
             wp_safe_redirect(add_query_arg(['auth_error' => $err, 'auth_provider' => 'google'], wp_login_url()));
+            exit;
+        }
+
+        // Cross-check subject: ID token vs userinfo
+        if (!empty($claims['sub']) && !empty($profile->sub) && $claims['sub'] !== $profile->sub) {
+            sol_log_login_attempt('google', $profile->email ?? '', 'failure', 'sub_mismatch');
+            wp_safe_redirect(add_query_arg(['auth_error' => 'sub_mismatch'], wp_login_url()));
             exit;
         }
     } elseif ($provider === 'github') {
@@ -288,7 +315,6 @@ function sol_handle_callback() {
             exit;
         }
     }
-    // ---------------------------------------------------
 
     if (empty($profile->id)) {
         sol_log_login_attempt($provider, $profile->email ?? '', 'failure', 'missing_profile_id');
@@ -317,6 +343,52 @@ function sol_handle_callback() {
     wp_set_auth_cookie($uid);
     wp_redirect(home_url());
     exit;
+}
+
+// -----------------------------------------------------------------------------
+// VERIFY GOOGLE ID TOKEN (server-side) using Google's tokeninfo endpoint
+// Validates: signature (by Google), issuer, audience, expiry, and NONCE
+// Returns claims array on success, WP_Error on failure.
+// -----------------------------------------------------------------------------
+function sol_verify_google_id_token(string $id_token, string $expected_aud, ?string $expected_nonce) {
+    // Use tokeninfo for simplicity (lets Google validate signature/format)
+    $resp = wp_remote_get(add_query_arg(['id_token' => $id_token], 'https://oauth2.googleapis.com/tokeninfo'), [
+        'timeout' => 15,
+    ]);
+    if (is_wp_error($resp)) {
+        return new WP_Error('id_token_http_error', $resp->get_error_message());
+    }
+    $code = wp_remote_retrieve_response_code($resp);
+    $body = json_decode(wp_remote_retrieve_body($resp), true);
+    if ($code !== 200 || !is_array($body)) {
+        return new WP_Error('id_token_invalid', 'Invalid ID token response');
+    }
+
+    // Acceptable issuers per Google docs
+    $iss = $body['iss'] ?? '';
+    $ok_iss = in_array($iss, ['accounts.google.com', 'https://accounts.google.com'], true);
+    if (!$ok_iss) {
+        return new WP_Error('id_token_bad_iss', 'Bad issuer');
+    }
+
+    // Audience must match our client_id
+    if (($body['aud'] ?? '') !== $expected_aud) {
+        return new WP_Error('id_token_bad_aud', 'Bad audience');
+    }
+
+    // Expiry check
+    $exp = isset($body['exp']) ? (int)$body['exp'] : 0;
+    if ($exp <= time()) {
+        return new WP_Error('id_token_expired', 'ID token expired');
+    }
+
+    // Nonce check (if we sent one)
+    if ($expected_nonce && (($body['nonce'] ?? '') !== $expected_nonce)) {
+        return new WP_Error('nonce_mismatch', 'Nonce mismatch');
+    }
+
+    // Return claims
+    return $body;
 }
 
 // -----------------------------------------------------------------------------
@@ -491,7 +563,23 @@ add_filter('wp_login_errors', function (WP_Error $errors) {
         $errors->add('email_required', wp_kses_post($msg));
     }
 
-    if (isset($_GET['auth_error']) && !in_array($_GET['auth_error'], ['email_not_approved','missing_config','email_unverified','email_required'], true)) {
+    // New Google OIDC errors
+    if (isset($_GET['auth_error']) && in_array($_GET['auth_error'], ['id_token_missing','id_token_http_error','id_token_invalid','id_token_bad_iss','id_token_bad_aud','id_token_expired','nonce_mismatch','sub_mismatch','state_expired'], true)) {
+        $map = [
+            'id_token_missing'   => __('<strong>Sign-in failed.</strong> Missing ID token from Google.', 'social-oauth-login'),
+            'id_token_http_error'=> __('<strong>Sign-in failed.</strong> Could not verify ID token (network error).', 'social-oauth-login'),
+            'id_token_invalid'   => __('<strong>Sign-in failed.</strong> Invalid ID token from Google.', 'social-oauth-login'),
+            'id_token_bad_iss'   => __('<strong>Sign-in failed.</strong> Invalid issuer in ID token.', 'social-oauth-login'),
+            'id_token_bad_aud'   => __('<strong>Sign-in failed.</strong> ID token not meant for this site.', 'social-oauth-login'),
+            'id_token_expired'   => __('<strong>Sign-in failed.</strong> Your sign-in expired. Please try again.', 'social-oauth-login'),
+            'nonce_mismatch'     => __('<strong>Sign-in failed.</strong> Nonce validation failed.', 'social-oauth-login'),
+            'sub_mismatch'       => __('<strong>Sign-in failed.</strong> Identity could not be verified (mismatch).', 'social-oauth-login'),
+            'state_expired'      => __('<strong>Sign-in expired.</strong> Please start again.', 'social-oauth-login'),
+        ];
+        $errors->add('oidc_error', wp_kses_post($map[$_GET['auth_error']]));
+    }
+
+    if (isset($_GET['auth_error']) && !in_array($_GET['auth_error'], ['email_not_approved','missing_config','email_unverified','email_required','id_token_missing','id_token_http_error','id_token_invalid','id_token_bad_iss','id_token_bad_aud','id_token_expired','nonce_mismatch','sub_mismatch','state_expired'], true)) {
         $desc = isset($_GET['auth_error_desc']) ? esc_html(sanitize_text_field(wp_unslash($_GET['auth_error_desc']))) : '';
         $errors->add('oauth_error', wp_kses_post(
             '<strong>OAuth error.</strong> ' . esc_html($_GET['auth_error']) . ($desc ? ' — ' . $desc : '')
