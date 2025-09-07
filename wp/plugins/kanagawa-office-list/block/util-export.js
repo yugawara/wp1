@@ -2,7 +2,11 @@
 import Papa from "https://esm.sh/papaparse@5.5.3";
 import { readFile } from "node:fs/promises";
 
-const BASE_URL = process.env.BASE_URL || "https://yasuaki.com";
+const BASE_URL = process.env.BASE_URL;
+if (!BASE_URL) {
+  console.error("❌ Missing BASE_URL. Please run with: BASE_URL=https://example.com node import_offices.mjs");
+  process.exit(1);
+}
 const JWT = process.env.JWT || "";
 if (!JWT) {
   console.error("Missing JWT. Run: JWT=... node --experimental-network-imports import_offices.mjs");

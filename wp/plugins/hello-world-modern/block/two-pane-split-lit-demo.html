@@ -151,7 +151,9 @@
     const btnLoad       = $('#btnLoad');
     const btnClear      = $('#btnClear');
 
-    const CPT_BASE = 'https://yasuaki.com/wp-json/wp/v2/office-cpt';
+// Use same origin as the page by default
+const CPT_BASE = `${location.origin}/wp-json/wp/v2/office-cpt`;
+
     window._officesLL = [];
     window.redraw = (opts={}) => fi.setOverlayPointsLonLat(window._officesLL, opts);
 

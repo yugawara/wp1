@@ -2,9 +2,16 @@
 /**
  * Plugin Name: Force Login to Bible Page (MU) with Persistent Admin Bar Toggle
  * Description: Redirect all non-logged-in visitors to a custom Bible page and let logged-in users toggle the front-end admin bar persistently via a cookie.
- * Version:     1.3
+ * Version:     1.4
  * Author:      Your Name
  */
+
+defined( 'ABSPATH' ) || exit;
+
+// Change this constant to the page you want to use
+if ( ! defined( 'FORCE_LOGIN_BIBLE_URL' ) ) {
+    define( 'FORCE_LOGIN_BIBLE_URL', home_url( '/bible/index.html' ) );
+}
 
 // When a toolbar param is present, set (or clear) a cookie to remember the choice
 add_action( 'init', function() {
@@ -19,7 +26,6 @@ add_action( 'init', function() {
 
 // Toggle admin bar based on the cookie (and still protect login/ajax)
 add_filter( 'show_admin_bar', function( $show ) {
-    // always hide toolbar for anonymous, login, cron, AJAX calls
     if (
         ! is_user_logged_in()
         || preg_match( '#wp-(login|cron|admin\.php)#i', $_SERVER['PHP_SELF'] )
@@ -27,12 +33,10 @@ add_filter( 'show_admin_bar', function( $show ) {
     ) {
         return false;
     }
-
-    // if cookie set to '1', show; if '0' or missing, hide
     return ( isset( $_COOKIE['show_toolbar'] ) && $_COOKIE['show_toolbar'] === '1' );
 } );
 
-// Redirect anonymous users to your Bible page
+// Redirect anonymous users to the Bible page
 add_action( 'template_redirect', function () {
     if (
         is_user_logged_in()
@@ -42,7 +46,6 @@ add_action( 'template_redirect', function () {
         return;
     }
 
-    wp_safe_redirect( 'https://yasuaki.com/bible.html' );
+    wp_safe_redirect( FORCE_LOGIN_BIBLE_URL );
     exit;
 } );
-
