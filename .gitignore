@@ -27,3 +27,8 @@ OldBlazorReference/
 blazorapp/
 blazor-publish/
 /backup
+
+# local audit + build
+_audit/
+**/bin/
+**/obj/
