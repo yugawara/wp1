@@ -1,0 +1,28 @@
+name: WP Local CI (guarded)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  wp-local:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup WordPress (guarded for GHA)
+        id: setup
+        run: sudo bash scripts/setup-wordpress.sh
+
+      - name: Post via REST API (smoke test)
+        env:
+          WP_BASE_URL: ${{ steps.setup.outputs.wp_base_url }}
+          WP_USER: ${{ steps.setup.outputs.wp_user }}
+          WP_APP_PASSWORD: ${{ steps.setup.outputs.wp_app_password }}
+        run: |
+          curl -f -sS -X POST "$WP_BASE_URL/wp-json/wp/v2/posts" \
+            -u "$WP_USER:$WP_APP_PASSWORD" \
+            -H "Content-Type: application/json" \
+            -d '{"title":"Hello from CI","status":"publish","content":"<p>It works 🎉</p>"}' \
+          | jq -r '.id' | tee post_id.txt
