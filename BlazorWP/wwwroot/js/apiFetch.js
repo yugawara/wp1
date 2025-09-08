@@ -20,6 +20,7 @@ export async function apiFetch(path, options = {}) {
     if (user && pass) {
       const basic = btoa(`${user}:${pass}`);
       options.headers['Authorization'] = 'Basic ' + basic;
+      options.credentials = 'omit'; // 👈 ignore cookies so Basic is honored
     }
   }
   const response = await fetch(url, options);

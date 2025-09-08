@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using BlazorWP.Data;
+using Microsoft.AspNetCore.Components.WebAssembly.Http;
 
 namespace BlazorWP;
 
@@ -53,6 +54,8 @@ public class AuthMessageHandler : DelegatingHandler
                 var (u, p) = creds.Value;
                 var basic = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{u}:{p}"));
                 request.Headers.Authorization = new AuthenticationHeaderValue("Basic", basic);
+                // 👇 prevent cookies from being sent when using AppPass
+                request.SetBrowserRequestCredentials(BrowserRequestCredentials.Omit);
             }
         }
 
