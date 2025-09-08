@@ -13,7 +13,7 @@ jobs:
 
       - name: Setup WordPress (guarded for GHA)
         id: setup
-        run: sudo bash scripts/setup-wordpress.sh
+        run: bash scripts/setup-wordpress.sh
 
       - name: Post via REST API (smoke test)
         env:
