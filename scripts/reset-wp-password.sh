@@ -1,1 +1,1 @@
-../private/reset-wp-password.sh
+../private/scripts/reset-wp-password.sh
