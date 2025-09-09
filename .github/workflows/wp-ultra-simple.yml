@@ -82,10 +82,11 @@ jobs:
             --admin_password=ChangeMe! \
             --admin_email=admin@example.com
 
-      # 🔽 Put the docroot server start right here
-      - name: Start PHP development server (docroot = wordpress)
+      - name: Start PHP development server (cd into wordpress)
         run: |
-          nohup php -d display_errors=1 -S 127.0.0.1:8081 -t wordpress index.php > server.log 2>&1 &
+          cd wordpress
+          nohup php -d display_errors=1 -S 127.0.0.1:8081 index.php > ../server.log 2>&1 &
+
 
       - name: Create CI author + Application Password
         id: app
