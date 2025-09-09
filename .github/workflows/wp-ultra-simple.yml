@@ -41,14 +41,17 @@ jobs:
           sudo chmod +x /usr/local/bin/wp
           wp --info
 
-      # No rm -rf needed on GitHub-hosted fresh VMs
-      - name: Create workspace
+      # optional but helpful (used later for JSON pretty-print)
+      - name: Install jq
         run: |
-          mkdir -p wordpress
+          sudo apt-get update -y
+          sudo apt-get install -y jq
+
+      - name: Create workspace
+        run: mkdir -p wordpress
 
       - name: Download WordPress
-        run: |
-          wp core download --path=wordpress
+        run: wp core download --path=wordpress
 
       - name: Wait for database readiness (runner-side)
         run: |
@@ -138,11 +141,13 @@ jobs:
             -H "Content-Type: application/json" \
             -d '{"title":"Hello from CI","status":"publish","content":"<p>It works 🎉</p>"}' \
           | jq .
-      # --- dotnet: plain runner install (no sudo, no container)
+
+      # ----- .NET: plain runner, user-local install (no sudo in action) -----
+
       - name: Prepare dotnet install dir (user-local)
         run: |
           echo "DOTNET_INSTALL_DIR=$HOME/.dotnet" >> "$GITHUB_ENV"
-          echo "DOTNET_ROOT=" >> "$GITHUB_ENV"   # clear system default so installer doesn't target /usr/share/dotnet
+          echo "DOTNET_ROOT=" >> "$GITHUB_ENV"   # clear system default so setup-dotnet doesn't target /usr/share/dotnet
 
       - name: Setup .NET 9 SDK
         uses: actions/setup-dotnet@v4
@@ -158,10 +163,27 @@ jobs:
       - name: Build (Release)
         run: dotnet build Workspace.sln -c Release --no-restore
 
-      - name: Run unit tests (BlazorWP.Tests)
+      - name: Run unit tests (BlazorWP.Tests) against local WP
+        env:
+          # pass WP creds, and override appsettings via env (WordPress:Url)
+          WP_BASE_URL: ${{ steps.app.outputs.wp_base_url }}      # http://127.0.0.1:8081
+          WP_USER: ${{ steps.app.outputs.wp_user }}
+          WP_APP_PASSWORD: ${{ steps.app.outputs.wp_app_password }}
+          WordPress__Url: ${{ steps.app.outputs.wp_base_url }}   # overrides appsettings.json
+          DOTNET_ENVIRONMENT: Development                        # optional; aligns with your dev config
+          DOTNET_CLI_TELEMETRY_OPTOUT: 1
+        run: |
+          dotnet test BlazorWP.Tests/BlazorWP.Tests.csproj -c Release --no-build --logger "trx;LogFileName=unit.trx"
+
+      # Optional: E2E / integration project, if present
+      - name: Run E2E/Integration tests (if any)
+        if: ${{ hashFiles('BlazorWP.E2E/*.csproj') != '' }}
         env:
           WP_BASE_URL: ${{ steps.app.outputs.wp_base_url }}
           WP_USER: ${{ steps.app.outputs.wp_user }}
           WP_APP_PASSWORD: ${{ steps.app.outputs.wp_app_password }}
+          WordPress__Url: ${{ steps.app.outputs.wp_base_url }}
+          DOTNET_ENVIRONMENT: Development
           DOTNET_CLI_TELEMETRY_OPTOUT: 1
-        run: dotnet test BlazorWP.Tests/BlazorWP.Tests.csproj -c Release --no-build --logger "trx;LogFileName=unit.trx"
+        run: |
+          dotnet test BlazorWP.E2E/BlazorWP.E2E.csproj -c Release --no-build --logger "trx;LogFileName=e2e.trx"
