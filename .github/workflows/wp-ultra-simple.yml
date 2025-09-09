@@ -147,7 +147,7 @@ jobs:
       - name: Prepare dotnet install dir (user-local)
         run: |
           echo "DOTNET_INSTALL_DIR=$HOME/.dotnet" >> "$GITHUB_ENV"
-          echo "DOTNET_ROOT=" >> "$GITHUB_ENV"   # clear system default so setup-dotnet doesn't target /usr/share/dotnet
+          echo "DOTNET_ROOT=" >> "$GITHUB_ENV"
 
       - name: Setup .NET 9 SDK
         uses: actions/setup-dotnet@v4
@@ -156,6 +156,15 @@ jobs:
 
       - name: Verify dotnet
         run: dotnet --info
+
+      # Ensure script is executable and required folders exist
+      - name: Make gen-appsettings.sh executable
+        run: chmod +x scripts/gen-appsettings.sh
+
+      - name: Ensure Blazor wwwroot folders exist
+        run: |
+          mkdir -p BlazorWP/wwwroot
+          mkdir -p blazor-publish/wwwroot
 
       # Generate Blazor WASM static config from env BEFORE restore/build
       - name: Generate Blazor appsettings.json from env
@@ -172,12 +181,11 @@ jobs:
 
       - name: Run unit tests (BlazorWP.Tests) against local WP
         env:
-          # pass WP creds, and override appsettings via env (WordPress:Url)
-          WP_BASE_URL: ${{ steps.app.outputs.wp_base_url }}      # http://127.0.0.1:8081
+          WP_BASE_URL: ${{ steps.app.outputs.wp_base_url }}
           WP_USER: ${{ steps.app.outputs.wp_user }}
           WP_APP_PASSWORD: ${{ steps.app.outputs.wp_app_password }}
-          WordPress__Url: ${{ steps.app.outputs.wp_base_url }}   # overrides appsettings.json
-          DOTNET_ENVIRONMENT: Development                        # optional; aligns with your dev config
+          WordPress__Url: ${{ steps.app.outputs.wp_base_url }}
+          DOTNET_ENVIRONMENT: Development
           DOTNET_CLI_TELEMETRY_OPTOUT: 1
         run: |
           dotnet test BlazorWP.Tests/BlazorWP.Tests.csproj -c Release --no-build --logger "trx;LogFileName=unit.trx"
