@@ -154,8 +154,9 @@ jobs:
           DOMAIN=aspnet.lan \
           BACKEND=http://127.0.0.1:8081 \
           LISTEN_PORT=8443 \
-          SRC_CERT_DIR=/srv/shared/aspnet/cert \
+          SRC_CERT_DIR=BlazorWP/cert/_shared \   # 👈 use the runner-owned copy
           BlazorWP/scripts/setup-apache-ssl-proxy.sh
+
 
       - name: HTTPS smoke test (Apache TLS → WordPress)
         run: |
