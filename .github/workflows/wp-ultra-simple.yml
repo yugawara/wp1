@@ -19,7 +19,6 @@ jobs:
           MARIADB_ROOT_PASSWORD: root
         ports:
           - 3306:3306
-        # ✅ Correct, TCP-based healthcheck that respects init time
         options: >-
           --health-cmd="mariadb-admin ping -h 127.0.0.1 --protocol=tcp -uroot -proot --connect-timeout=2 --silent"
           --health-interval=5s
@@ -42,16 +41,15 @@ jobs:
           sudo chmod +x /usr/local/bin/wp
           wp --info
 
-      - name: Prepare clean workspace
+      # No rm -rf needed on GitHub-hosted fresh VMs
+      - name: Create workspace
         run: |
-          rm -rf wordpress
           mkdir -p wordpress
 
       - name: Download WordPress
         run: |
           wp core download --path=wordpress
 
-      # ✅ Explicit TCP wait from the runner to the mapped port
       - name: Wait for database readiness (runner-side)
         run: |
           for i in {1..180}; do
@@ -87,7 +85,6 @@ jobs:
           cd wordpress
           nohup php -d display_errors=1 -S 127.0.0.1:8081 index.php > ../server.log 2>&1 &
 
-
       - name: Create CI author + Application Password
         id: app
         run: |
@@ -96,7 +93,6 @@ jobs:
           echo "wp_base_url=http://127.0.0.1:8081" >> "$GITHUB_OUTPUT"
           echo "wp_user=ci-poster" >> "$GITHUB_OUTPUT"
           echo "wp_app_password=$APP" >> "$GITHUB_OUTPUT"
-
 
       - name: WP REST sanity (CLI, bypass HTTP)
         run: |
