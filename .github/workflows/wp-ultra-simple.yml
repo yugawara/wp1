@@ -157,25 +157,60 @@ jobs:
       - name: Verify dotnet
         run: dotnet --info
 
-      # Ensure script is executable and required folders exist
       - name: Make gen-appsettings.sh executable
         run: chmod +x scripts/gen-appsettings.sh
 
-      - name: Ensure Blazor wwwroot folders exist
+      - name: Preflight FS sanity (before gen-appsettings)
         run: |
-          mkdir -p BlazorWP/wwwroot
-          mkdir -p blazor-publish/wwwroot
+          set -euxo pipefail
+          echo "pwd:"; pwd
+          echo "whoami:"; whoami
+          echo "workspace: ${GITHUB_WORKSPACE}"
+          echo "tree (top):"
+          ls -la
+          echo "tree (BlazorWP before mkdir):"
+          ls -la BlazorWP || true
+          echo "df:"
+          df -h
 
-      - name: Generate Blazor appsettings.json from env
+      - name: Ensure Blazor wwwroot folders exist + verify
+        run: |
+          set -euxo pipefail
+          mkdir -p BlazorWP/wwwroot
+          ls -ld BlazorWP BlazorWP/wwwroot
+          stat BlazorWP || true
+          stat BlazorWP/wwwroot || true
+
+      - name: Generate Blazor appsettings.json from env (debug)
+        shell: bash
         env:
           WP_BASE_URL: ${{ steps.app.outputs.wp_base_url }}
-        run: ./scripts/gen-appsettings.sh
+        run: |
+          set -euxo pipefail
+          bash --version
+          which bash
+          file scripts/gen-appsettings.sh || true
+          ls -la scripts
+          # run with xtrace for full command echoing
+          bash -x ./scripts/gen-appsettings.sh
+
+      - name: Postflight FS check (after gen-appsettings)
+        if: always()
+        run: |
+          set -euxo pipefail
+          ls -la BlazorWP/wwwroot || true
+          echo "Show appsettings.json if present:"
+          sed -n '1,120p' BlazorWP/wwwroot/appsettings.json || true
+          echo "Server log (if any):"
+          tail -n +1 server.log || true
+          echo "PHP debug.log (if any):"
+          tail -n +1 wordpress/wp-content/debug.log || true
 
       - name: Restore
         run: dotnet restore Workspace.sln
 
       - name: Build (Release)
-        run: dotnet build Workspace.sln -c Release --no-restore
+        run: dotnet build Workspace.sln -c Release --no-build
 
       - name: Run unit tests (BlazorWP.Tests) against local WP
         env:
@@ -188,7 +223,6 @@ jobs:
         run: |
           dotnet test BlazorWP.Tests/BlazorWP.Tests.csproj -c Release --no-build --logger "trx;LogFileName=unit.trx"
 
-      # Optional: E2E / integration project, if present
       - name: Run E2E/Integration tests (if any)
         if: ${{ hashFiles('BlazorWP.E2E/*.csproj') != '' }}
         env:
