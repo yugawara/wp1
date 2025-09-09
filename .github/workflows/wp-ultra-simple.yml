@@ -104,29 +104,23 @@ jobs:
       # 🔍 Step 12: Diagnostics before REST smoke test
       - name: Diagnostics (dump WP state)
         run: |
-          echo "=== PHP version ==="
-          php -v
-
-          echo "=== WP version ==="
-          wp core version --path=wordpress
-
-          echo "=== Users ==="
-          wp user list --path=wordpress --fields=ID,user_login,user_email,roles
-
-          echo "=== Active theme ==="
-          wp theme list --path=wordpress --status=active
-
-          echo "=== Plugins ==="
-          wp plugin list --path=wordpress || true
-
-          echo "=== DB check ==="
-          wp db check --path=wordpress
+          echo "=== PHP version ==="; php -v
+          echo "=== WP version ==="; wp core version --path=wordpress
+          echo "=== Users ==="; wp user list --path=wordpress --fields=ID,user_login,user_email,roles
+          echo "=== Active theme ==="; wp theme list --path=wordpress --status=active
+          echo "=== Plugins ==="; wp plugin list --path=wordpress || true
+          echo "=== DB check ==="; wp db check --path=wordpress
 
           echo "=== Site root (curl) ==="
           curl -s -I http://127.0.0.1:8081/ | head -n 20
 
           echo "=== REST index ==="
-          curl -s http://127.0.0.1:8081/wp-json/ | jq .
+          curl -fsSL -H 'Accept: application/json' \
+            -o /tmp/rest.json -D /tmp/rest.headers \
+            http://127.0.0.1:8081/wp-json/
+          grep -i '^content-type:' /tmp/rest.headers || true
+          jq -e . /tmp/rest.json > /dev/null && jq . /tmp/rest.json
+
 
       - name: REST smoke test
         env:
@@ -134,7 +128,7 @@ jobs:
           WP_USER: ${{ steps.app.outputs.wp_user }}
           WP_APP_PASSWORD: ${{ steps.app.outputs.wp_app_password }}
         run: |
-          curl -f -sS -X POST "$WP_BASE_URL/wp-json/wp/v2/posts" \
+          curl -fsSL -L -X POST "$WP_BASE_URL/index.php?rest_route=/wp/v2/posts" \
             -u "$WP_USER:$WP_APP_PASSWORD" \
             -H "Content-Type: application/json" \
             -d '{"title":"Hello from CI","status":"publish","content":"<p>It works 🎉</p>"}' \
