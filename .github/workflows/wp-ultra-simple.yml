@@ -41,12 +41,6 @@ jobs:
           sudo chmod +x /usr/local/bin/wp
           wp --info
 
-      # jq for JSON output, brotli for optional precompression in the script
-      - name: Install jq + brotli
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y jq brotli
-
       # --- NEW: prerequisites for generate-ca-and-certs (certutil, CA tools) ---
       - name: Install NSS tools (certutil) + CA utilities
         run: |
