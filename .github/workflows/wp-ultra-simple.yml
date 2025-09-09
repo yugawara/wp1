@@ -82,17 +82,10 @@ jobs:
             --admin_password=ChangeMe! \
             --admin_email=admin@example.com
 
-      - name: Start PHP development server (log to file)
+      # 🔽 Put the docroot server start right here
+      - name: Start PHP development server (docroot = wordpress)
         run: |
-          cat > router.php <<'PHP'
-          <?php
-          $root = __DIR__.'/wordpress';
-          $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-          if ($path !== '/' && file_exists($root.$path)) { return false; }
-          chdir($root);
-          require $root.'/index.php';
-          PHP
-          nohup php -d display_errors=1 -S 127.0.0.1:8081 router.php > server.log 2>&1 &
+          nohup php -d display_errors=1 -S 127.0.0.1:8081 -t wordpress index.php > server.log 2>&1 &
 
       - name: Create CI author + Application Password
         id: app
@@ -102,6 +95,7 @@ jobs:
           echo "wp_base_url=http://127.0.0.1:8081" >> "$GITHUB_OUTPUT"
           echo "wp_user=ci-poster" >> "$GITHUB_OUTPUT"
           echo "wp_app_password=$APP" >> "$GITHUB_OUTPUT"
+
 
       - name: WP REST sanity (CLI, bypass HTTP)
         run: |
