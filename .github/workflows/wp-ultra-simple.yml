@@ -166,11 +166,9 @@ jobs:
           mkdir -p BlazorWP/wwwroot
           mkdir -p blazor-publish/wwwroot
 
-      # Generate Blazor WASM static config from env BEFORE restore/build
       - name: Generate Blazor appsettings.json from env
         env:
-          WP_BASE_URL: ${{ steps.app.outputs.wp_base_url }}  # http://127.0.0.1:8081
-          PRECOMPRESS: 1
+          WP_BASE_URL: ${{ steps.app.outputs.wp_base_url }}
         run: ./scripts/gen-appsettings.sh
 
       - name: Restore
