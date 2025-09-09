@@ -2,27 +2,37 @@
 set -euo pipefail
 
 ROOT="${GITHUB_WORKSPACE:-$PWD}"
-OUT="${ROOT}/BlazorWP/wwwroot/appsettings.json"
-DIR="$(dirname "$OUT")"
+OUT_WWW="${ROOT}/BlazorWP/wwwroot/appsettings.json"
+OUT_DEV="${ROOT}/BlazorWP/appsettings.Development.json"
 
 echo "[DEBUG] ROOT=$ROOT"
-echo "[DEBUG] OUT=$OUT"
+echo "[DEBUG] OUT_WWW=$OUT_WWW"
+echo "[DEBUG] OUT_DEV=$OUT_DEV"
 
-# Ensure directory exists
-mkdir -p "$DIR"
+mkdir -p "$(dirname "$OUT_WWW")" "$(dirname "$OUT_DEV")"
 
-# If appsettings.json is a symlink (or anything non-regular), remove it
-if [[ -L "$OUT" || ( -e "$OUT" && ! -f "$OUT" ) ]]; then
-  echo "[DEBUG] Removing non-regular OUT ($OUT)"
-  rm -f "$OUT"
-fi
+# If path exists but isn't a regular file (e.g., symlink), remove it so we can write a plain file.
+for f in "$OUT_WWW" "$OUT_DEV"; do
+  if [[ -L "$f" || ( -e "$f" && ! -f "$f" ) ]]; then
+    echo "[DEBUG] Removing non-regular: $f"
+    rm -f "$f"
+  fi
+done
 
-# Write a regular file (never follow symlinks)
-printf '%s\n' \
-'{' \
-"  \"WpBaseUrl\": \"${WP_BASE_URL:-http://127.0.0.1:8081}\"" \
-'}' > "$OUT"
+payload() {
+  cat <<JSON
+{
+  "WpBaseUrl": "${WP_BASE_URL:-http://127.0.0.1:8081}"
+}
+JSON
+}
 
-echo "[DEBUG] Wrote: $OUT"
-ls -l "$OUT" || true
-sed -n '1,120p' "$OUT" || true
+payload > "$OUT_WWW"
+payload > "$OUT_DEV"
+
+echo "[DEBUG] Wrote:"
+ls -l "$OUT_WWW" "$OUT_DEV" || true
+echo "[DEBUG] appsettings.json:"
+sed -n '1,120p' "$OUT_WWW" || true
+echo "[DEBUG] appsettings.Development.json:"
+sed -n '1,120p' "$OUT_DEV" || true
