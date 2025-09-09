@@ -1,34 +1,23 @@
 #!/usr/bin/env bash
-# scripts/gen-appsettings.sh
-# Generate Blazor WASM wwwroot/appsettings.json from env for CI.
-# Required: WP_BASE_URL (e.g., http://127.0.0.1:8081)
-# Optional: PRECOMPRESS=1 to also write .gz/.br
-# Optional: DRY_RUN=1 to only print what would be written.
-
 set -euo pipefail
 
-: "${WP_BASE_URL:?WP_BASE_URL is required}"
+: "${WP_BASE_URL:?WP_BASE_URL is required (e.g., http://127.0.0.1:8081)}"
 
-write_json() {
+generate_file() {
   local target="$1"
-  local content
-  read -r -d '' content <<JSON || true
-{
-  "WordPress": { "Url": "${WP_BASE_URL}" }
-}
-JSON
+  mkdir -p "$(dirname "$target")"
+  local content="{ \"WordPress\": { \"Url\": \"${WP_BASE_URL}\" } }"
 
   if [[ "${DRY_RUN:-0}" == "1" ]]; then
     echo "[DRY-RUN] Would write to $target:"
     echo "$content"
   else
-    mkdir -p "$(dirname "$target")"
     echo "$content" > "$target"
     echo "Wrote $target -> ${WP_BASE_URL}"
   fi
 }
 
-precompress_if_enabled() {
+compress_if_needed() {
   local target="$1"
   if [[ "${PRECOMPRESS:-0}" == "1" && "${DRY_RUN:-0}" != "1" ]]; then
     gzip -c9 "$target" > "${target}.gz"
@@ -41,12 +30,12 @@ precompress_if_enabled() {
   fi
 }
 
-# Primary Blazor project
-write_json "BlazorWP/wwwroot/appsettings.json"
-precompress_if_enabled "BlazorWP/wwwroot/appsettings.json"
+# Blazor project
+generate_file "BlazorWP/wwwroot/appsettings.json"
+compress_if_needed "BlazorWP/wwwroot/appsettings.json"
 
-# Optional publish/static directory
-if [[ -d "blazor-publish/wwwroot" ]]; then
-  write_json "blazor-publish/wwwroot/appsettings.json"
-  precompress_if_enabled "blazor-publish/wwwroot/appsettings.json"
+# Optional publish folder
+if [[ -d "blazor-publish" ]]; then
+  generate_file "blazor-publish/wwwroot/appsettings.json"
+  compress_if_needed "blazor-publish/wwwroot/appsettings.json"
 fi
