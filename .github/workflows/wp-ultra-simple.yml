@@ -114,11 +114,11 @@ jobs:
           echo "=== Site root (curl) ==="
           curl -s -I http://127.0.0.1:8081/ | head -n 20
 
-          echo "=== REST index ==="
-          curl -fsSL -H 'Accept: application/json' \
-            -o /tmp/rest.json -D /tmp/rest.headers \
-            http://127.0.0.1:8081/wp-json/
-          grep -i '^content-type:' /tmp/rest.headers || true
+          echo "=== REST index (non-pretty) ==="
+          curl -fsS 'http://127.0.0.1:8081/index.php?rest_route=/' \
+            -H 'Accept: application/json' \
+            -o /tmp/rest.json -D /tmp/rest.h
+          grep -i '^content-type:' /tmp/rest.h || true
           jq -e . /tmp/rest.json > /dev/null && jq . /tmp/rest.json
 
 
@@ -128,7 +128,7 @@ jobs:
           WP_USER: ${{ steps.app.outputs.wp_user }}
           WP_APP_PASSWORD: ${{ steps.app.outputs.wp_app_password }}
         run: |
-          curl -fsSL -L -X POST "$WP_BASE_URL/index.php?rest_route=/wp/v2/posts" \
+          curl -fsS -X POST "$WP_BASE_URL/index.php?rest_route=/wp/v2/posts" \
             -u "$WP_USER:$WP_APP_PASSWORD" \
             -H "Content-Type: application/json" \
             -d '{"title":"Hello from CI","status":"publish","content":"<p>It works 🎉</p>"}' \
