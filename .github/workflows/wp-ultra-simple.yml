@@ -31,6 +31,29 @@ jobs:
           php-version: '8.3'
           extensions: mysqli, curl, mbstring, xml, zip, gd
 
+      - name: Diagnostics check for existing wp before install
+        run: |
+          set -euxo pipefail
+          echo "Checking PATH for wp..."
+          which wp || echo "wp not in PATH"
+          command -v wp || true
+
+          echo "Check /usr/local/bin/wp presence:"
+          ls -l /usr/local/bin/wp || echo "no /usr/local/bin/wp"
+
+          echo "Check workspace for leftover ./wp file:"
+          ls -l ./wp || echo "no local ./wp file"
+
+          echo "Free space on current filesystem:"
+          df -h .
+
+          echo "Disk write test (1MB):"
+          dd if=/dev/zero of=fs_test.bin bs=1M count=1 status=none && rm -f fs_test.bin
+
+          echo "Environment PATH:"
+          echo $PATH
+
+
       - name: Install WP-CLI
         run: |
           curl -fsSL -o wp https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
