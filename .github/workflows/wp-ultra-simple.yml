@@ -129,11 +129,12 @@ jobs:
           grep -i '^content-type:' /tmp/rest.h || true
           jq -e . /tmp/rest.json > /dev/null && jq . /tmp/rest.json
 
-      # --- NEW: Generate a local CA + leaf certs (iOS/macOS compatible SANs) ---
+      # Generate a local CA + leaf certs (iOS/macOS compatible SANs)
       - name: Generate CA and certs
         shell: bash
         run: |
           set -euxo pipefail
+          chmod +x BlazorWP/scripts/generate-ca-and-certs.sh
           bash BlazorWP/scripts/generate-ca-and-certs.sh
           echo "--- Generated cert artifacts (BlazorWP/cert) ---"
           ls -la BlazorWP/cert || true
@@ -142,11 +143,25 @@ jobs:
 
           # bring shared dir into workspace so upload-artifact can access without absolute path
           sudo cp -r /srv/shared/aspnet/cert BlazorWP/cert/_shared
-
-          # 👇 FIX: ensure the runner owns and can read everything we’re about to upload
           sudo chown -R "$USER":"$USER" BlazorWP/cert/_shared
           find BlazorWP/cert/_shared -type d -print0 | xargs -0 chmod u+rwx,go+rx
           find BlazorWP/cert/_shared -type f -print0 | xargs -0 chmod u+rw,go+r
+
+      - name: Setup Apache SSL proxy (aspnet.lan → PHP server)
+        run: |
+          set -euxo pipefail
+          chmod +x BlazorWP/scripts/setup-apache-ssl-proxy.sh
+          DOMAIN=aspnet.lan \
+          BACKEND=http://127.0.0.1:8081 \
+          LISTEN_PORT=8443 \
+          SRC_CERT_DIR=/srv/shared/aspnet/cert \
+          BlazorWP/scripts/setup-apache-ssl-proxy.sh
+
+      - name: HTTPS smoke test (Apache TLS → WordPress)
+        run: |
+          set -euxo pipefail
+          curl -I https://aspnet.lan:8443/
+          curl -fsS https://aspnet.lan:8443/ | head -n 20
 
       - name: Upload cert artifacts
         uses: actions/upload-artifact@v4
