@@ -2,13 +2,9 @@ using BlazorWP.Data;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
-using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Primitives;
-using PanoramicData.Blazor.Extensions;
 using TG.Blazor.IndexedDB;
-using System.Collections.Generic;
-using System.Globalization;
-using System.Linq;
+using Microsoft.AspNetCore.WebUtilities;
 
 namespace BlazorWP
 {
@@ -30,7 +26,6 @@ namespace BlazorWP
                 var handler = sp.GetRequiredService<AuthMessageHandler>();
                 return new HttpClient(handler) { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) };
             });
-            builder.Services.AddPanoramicDataBlazor();
             builder.Services.AddScoped<AppPasswordService>();
             builder.Services.AddScoped<UploadPdfJsInterop>();
             builder.Services.AddScoped<WpNonceJsInterop>();
