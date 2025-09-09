@@ -8,6 +8,7 @@ on:
 jobs:
   wp:
     runs-on: ubuntu-latest
+
     services:
       db:
         image: mariadb:11
