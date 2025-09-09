@@ -41,11 +41,11 @@ jobs:
           sudo chmod +x /usr/local/bin/wp
           wp --info
 
-      # optional but helpful (used later for JSON pretty-print)
-      - name: Install jq
+      # jq for JSON output, brotli for optional precompression in the script
+      - name: Install jq + brotli
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y jq
+          sudo apt-get install -y jq brotli
 
       - name: Create workspace
         run: mkdir -p wordpress
@@ -156,6 +156,13 @@ jobs:
 
       - name: Verify dotnet
         run: dotnet --info
+
+      # Generate Blazor WASM static config from env BEFORE restore/build
+      - name: Generate Blazor appsettings.json from env
+        env:
+          WP_BASE_URL: ${{ steps.app.outputs.wp_base_url }}  # http://127.0.0.1:8081
+          PRECOMPRESS: 1
+        run: ./scripts/gen-appsettings.sh
 
       - name: Restore
         run: dotnet restore Workspace.sln
