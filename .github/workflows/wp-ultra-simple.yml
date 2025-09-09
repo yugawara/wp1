@@ -103,7 +103,33 @@ jobs:
           echo "wp_user=ci-poster" >> "$GITHUB_OUTPUT"
           echo "wp_app_password=$APP" >> "$GITHUB_OUTPUT"
 
-      # 12) Smoke test the REST API by publishing a post via HTTPS basic auth (Application Passwords).
+      # 🔍 Step 12: Diagnostics before REST smoke test
+      - name: Diagnostics (dump WP state)
+        run: |
+          echo "=== PHP version ==="
+          php -v
+
+          echo "=== WP version ==="
+          wp core version --path=wordpress
+
+          echo "=== Users ==="
+          wp user list --path=wordpress --fields=ID,user_login,user_email,roles
+
+          echo "=== Active theme ==="
+          wp theme list --path=wordpress --status=active
+
+          echo "=== Plugins ==="
+          wp plugin list --path=wordpress || true
+
+          echo "=== DB check ==="
+          wp db check --path=wordpress
+
+          echo "=== Site root (curl) ==="
+          curl -s -I http://127.0.0.1:8081/ | head -n 20
+
+          echo "=== REST index ==="
+          curl -s http://127.0.0.1:8081/wp-json/ | jq .
+
       - name: REST smoke test
         env:
           WP_BASE_URL: ${{ steps.app.outputs.wp_base_url }}
