@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "[DEBUG] Current working directory:"
-pwd
-echo "[DEBUG] Listing current directory contents:"
-ls -la
-echo "[DEBUG] Listing repo root contents (one up):"
-ls -la ..
+OUT="BlazorWP/wwwroot/appsettings.json"
+mkdir -p "$(dirname "$OUT")"     # <-- ensure the directory exists
 
-# now the part that writes appsettings.json
-cat > BlazorWP/wwwroot/appsettings.json <<'JSON'
+echo "[DEBUG] writing to: $OUT"
+cat > "$OUT" <<JSON
 {
-  "WpBaseUrl": "'"${WP_BASE_URL:-http://127.0.0.1:8081}"'"
+  "WpBaseUrl": "${WP_BASE_URL:-http://127.0.0.1:8081}"
 }
 JSON
+
+echo "[DEBUG] wrote file; listing dir:"
+ls -la "$(dirname "$OUT")"
