@@ -47,6 +47,12 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y jq brotli
 
+      # --- NEW: prerequisites for generate-ca-and-certs (certutil, CA tools) ---
+      - name: Install NSS tools (certutil) + CA utilities
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y libnss3-tools ca-certificates
+
       - name: Create workspace
         run: mkdir -p wordpress
 
@@ -129,6 +135,28 @@ jobs:
           grep -i '^content-type:' /tmp/rest.h || true
           jq -e . /tmp/rest.json > /dev/null && jq . /tmp/rest.json
 
+      # --- NEW: Generate a local CA + leaf certs (iOS/macOS compatible SANs) ---
+      - name: Generate CA and certs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          bash BlazorWP/scripts/generate-ca-and-certs.sh
+          echo "--- Generated cert artifacts (BlazorWP/cert) ---"
+          ls -la BlazorWP/cert || true
+          echo "--- Shared publish dir (/srv/shared/aspnet/cert) ---"
+          sudo ls -la /srv/shared/aspnet/cert || true
+          # bring shared dir into workspace so upload-artifact can access without absolute path
+          sudo cp -r /srv/shared/aspnet/cert BlazorWP/cert/_shared
+
+      - name: Upload cert artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: aspnet-dev-certs
+          path: |
+            BlazorWP/cert/**
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: REST smoke test (create a post, non-pretty route)
         env:
           WP_BASE_URL: ${{ steps.app.outputs.wp_base_url }}
@@ -166,11 +194,6 @@ jobs:
           WP_BASE_URL: ${{ steps.app.outputs.wp_base_url }}
         run: |
           set -euxo pipefail
-          bash --version
-          which bash
-          file scripts/gen-appsettings.sh || true
-          ls -la scripts
-          # run with xtrace for full command echoing
           bash -x ./scripts/gen-appsettings.sh
 
       - name: Postflight FS check (after gen-appsettings)
