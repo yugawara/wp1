@@ -2,8 +2,6 @@
 set -euo pipefail
 
 ### ── SAFETY GUARD: only run inside GitHub Actions ────────────────────────────
-# GitHub-hosted runners always expose GITHUB_ACTIONS=true and GITHUB_RUN_ID.
-# You can bypass (e.g., for local testing) by exporting ALLOW_OUTSIDE_GHA=1.
 if [[ "${ALLOW_OUTSIDE_GHA:-0}" != "1" ]]; then
   if [[ "${GITHUB_ACTIONS:-}" != "true" ]] || [[ -z "${GITHUB_RUN_ID:-}" ]]; then
     echo "[ABORT] This script is locked to GitHub Actions. Set ALLOW_OUTSIDE_GHA=1 to bypass (at your own risk)."
@@ -11,7 +9,6 @@ if [[ "${ALLOW_OUTSIDE_GHA:-0}" != "1" ]]; then
   fi
 fi
 
-# Extra sanity: require Ubuntu (GitHub ubuntu-* runners) unless overridden.
 if [[ "${ALLOW_NON_UBUNTU:-0}" != "1" ]]; then
   if ! grep -qi 'ubuntu' /etc/os-release 2>/dev/null; then
     echo "[ABORT] Non-Ubuntu environment detected. Set ALLOW_NON_UBUNTU=1 to bypass."
@@ -100,14 +97,13 @@ sudo service apache2 reload || true
 ### ── wp-config & WP-CLI ──────────────────────────────────────────────────────
 log "Preparing wp-config.php (idempotent)"
 if [[ ! -f "${WP_ROOT}/wp-config.php" ]]; then
-  sudo cp "${WP_ROOT}/wp-config-sample.php" "${WP_ROOT}/wp-config.php"
-  sudo sed -i \
+  sudo -u www-data cp "${WP_ROOT}/wp-config-sample.php" "${WP_ROOT}/wp-config.php"
+  sudo -u www-data sed -i \
     -e "s/database_name_here/${DB_NAME}/" \
     -e "s/username_here/${DB_USER}/" \
     -e "s/password_here/${DB_PASS}/" \
     "${WP_ROOT}/wp-config.php"
-  # Harden file editing
-  sudo bash -c "echo \"define('DISALLOW_FILE_EDIT', true);\" >> '${WP_ROOT}/wp-config.php'"
+  sudo -u www-data bash -c "echo \"define('DISALLOW_FILE_EDIT', true);\" >> '${WP_ROOT}/wp-config.php'"
 fi
 
 log "Installing WP-CLI (if missing)"
@@ -142,7 +138,6 @@ fi
 log "Creating Application Password for CI user"
 APP_PASS_LINE=$(sudo -u www-data wp user application-password create "${CI_USER}" "github-actions" --porcelain --path="${WP_ROOT}" || true)
 if [[ -z "${APP_PASS_LINE}" ]]; then
-  # If an app password with that name exists, grab the newest one
   APP_PASS_LINE=$(sudo -u www-data wp user application-password list "${CI_USER}" --format=csv --path="${WP_ROOT}" | tail -n 1 | cut -d, -f1-1 || true)
 fi
 
