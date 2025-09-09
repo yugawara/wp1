@@ -93,6 +93,8 @@ EOF
 sudo a2ensite wordpress.conf >/dev/null || true
 sudo a2dissite 000-default.conf >/dev/null || true
 sudo service apache2 reload || true
+# tiny wait to avoid race
+for i in {1..10}; do curl -fsS http://localhost/ >/dev/null && break; sleep 1; done
 
 ### ── wp-config & WP-CLI ──────────────────────────────────────────────────────
 log "Preparing wp-config.php (idempotent)"
@@ -125,9 +127,26 @@ if ! sudo -u www-data wp core is-installed --path="${WP_ROOT}" >/dev/null 2>&1; 
     --admin_user="${ADMIN_USER}" \
     --admin_password="${ADMIN_PASS}" \
     --admin_email="${ADMIN_EMAIL}"
-  sudo -u www-data wp rewrite structure '/%postname%/' --path="${WP_ROOT}"
-  sudo -u www-data wp rewrite flush --hard --path="${WP_ROOT}"
 fi
+
+# 🔧 Avoid wp-cli proc_open: set permalinks + .htaccess manually
+log "Setting pretty permalinks without wp rewrite commands"
+sudo -u www-data wp option update permalink_structure '/%postname%/' --path="${WP_ROOT}"
+
+sudo bash -c "cat > '${WP_ROOT}/.htaccess' <<'HT'
+# BEGIN WordPress
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteBase /
+RewriteRule ^index\.php$ - [L]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . /index.php [L]
+</IfModule>
+# END WordPress
+HT"
+sudo chown www-data:www-data '${WP_ROOT}/.htaccess'
+sudo chmod 644 '${WP_ROOT}/.htaccess'
 
 ### ── CI user & Application Password ──────────────────────────────────────────
 log "Ensuring CI user exists"
