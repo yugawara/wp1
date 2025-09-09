@@ -51,23 +51,21 @@ jobs:
         run: |
           wp core download --path=wordpress
 
-      # 7) Create wp-config.php pointing at the service DB (fresh file in a fresh dir; no --force).
-        #    We use 127.0.0.1 because Actions maps the service container port onto the job VM.
-      - name: Create wp-config.php
-        run: |
-          wp config create --path=wordpress \
-            --dbname=wordpress --dbuser=wp --dbpass=wp --dbhost=127.0.0.1
-
-      # 8) Wait until DB actually accepts connections.
-        #    We use WP-CLI's own DB check in a short retry loop (deterministic readiness, no healthcheck flakiness).
+      # 7) Wait until DB actually accepts connections
       - name: Wait for database readiness
         run: |
           for i in {1..90}; do
-            wp db check --path=wordpress && exit 0
+            mysqladmin ping -h127.0.0.1 -uwp -pwp --silent && exit 0
             sleep 2
           done
           echo "Database did not become ready in time." >&2
           exit 1
+
+      # 8) Create wp-config.php (safe now, DB is alive)
+      - name: Create wp-config.php
+        run: |
+          wp config create --path=wordpress \
+            --dbname=wordpress --dbuser=wp --dbpass=wp --dbhost=127.0.0.1
 
       # 9) Install WordPress (fresh DB; this is the first/only install this run).
       - name: Install WordPress
