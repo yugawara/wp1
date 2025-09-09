@@ -9,7 +9,7 @@ jobs:
   wp:
     runs-on: ubuntu-latest
 
-    # 1) Database runs as a GitHub Actions service container (isolated per run).
+    # Database runs as a GitHub Actions service container (isolated per run).
     services:
       db:
         image: mariadb:11
@@ -20,54 +20,67 @@ jobs:
           MARIADB_ROOT_PASSWORD: root         # root password (used by entrypoint only)
         ports:
           - 3306:3306                         # expose to the job VM
-        # (No healthcheck here; we do an explicit readiness wait below.)
+        # Optional: healthcheck so the container retries until ready.
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -uroot -proot --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
 
     steps:
-      # 2) Fetch your repository (not strictly needed for this demo, but standard).
+      # 1) Fetch your repository (standard).
       - uses: actions/checkout@v4
 
-      # 3) Install PHP 8.3 + extensions WP needs (runs only in this ephemeral VM).
+      # 2) Install PHP 8.3 + required extensions (runner is brand-new each run).
       - name: Install PHP 8.3 + extensions
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
           extensions: mysqli, curl, mbstring, xml, zip, gd
 
-      # 4) Install WP-CLI in PATH (always; runner is brand-new each run).
+      # 3) Install WP-CLI in PATH.
       - name: Install WP-CLI
         run: |
           sudo wget -qO /usr/local/bin/wp https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
           sudo chmod +x /usr/local/bin/wp
           wp --info
 
-      # 5) Ensure a clean working directory for WordPress (no --force; we explicitly remove then create).
+      # 4) Ensure a clean working directory (explicit remove; no --force later).
       - name: Prepare clean workspace
         run: |
           rm -rf wordpress
           mkdir -p wordpress
 
-      # 6) Download WordPress core into ./wordpress (fresh folder; no overwrite flags needed).
+      # 5) Download WordPress core into ./wordpress (fresh folder).
       - name: Download WordPress
         run: |
           wp core download --path=wordpress
 
-      # 7) Wait until DB actually accepts connections
+      # 6) Properly wait until DB actually accepts connections (BEFORE touching it).
       - name: Wait for database readiness
         run: |
-          for i in {1..90}; do
+          for i in {1..180}; do # up to ~6 minutes
             mysqladmin ping -h127.0.0.1 -uwp -pwp --silent && exit 0
             sleep 2
           done
           echo "Database did not become ready in time." >&2
           exit 1
 
-      # 8) Create wp-config.php (safe now, DB is alive)
+      # 7) Create wp-config.php (now that DB is alive).
       - name: Create wp-config.php
         run: |
           wp config create --path=wordpress \
             --dbname=wordpress --dbuser=wp --dbpass=wp --dbhost=127.0.0.1
 
-      # 9) Install WordPress (fresh DB; this is the first/only install this run).
+      # 8) Enable WP/PHP debugging and log to file (no HTML fatals in CI).
+      - name: Enable WP debug
+        run: |
+          wp config set WP_DEBUG true --path=wordpress --type=constant --raw
+          wp config set WP_DEBUG_LOG true --path=wordpress --type=constant --raw
+          wp config set WP_DEBUG_DISPLAY false --path=wordpress --type=constant --raw
+          wp config set WP_DISABLE_FATAL_ERROR_HANDLER true --path=wordpress --type=constant --raw
+
+      # 9) Install WordPress (fresh DB; first/only install this run).
       - name: Install WordPress
         run: |
           wp core install --path=wordpress \
@@ -78,7 +91,7 @@ jobs:
             --admin_email=admin@example.com
 
       # 10) Start the built-in PHP server to serve the site (no Apache/nginx).
-         #     We use a tiny router so non-existent paths fall through to index.php like mod_rewrite.
+      #     We log to server.log so HTTP 500s aren't silent.
       - name: Start PHP development server
         run: |
           cat > router.php <<'PHP'
@@ -89,9 +102,9 @@ jobs:
           chdir($root);
           require $root.'/index.php';
           PHP
-          nohup php -S 127.0.0.1:8081 router.php >/dev/null 2>&1 &
+          nohup php -d display_errors=1 -S 127.0.0.1:8081 router.php > server.log 2>&1 &
 
-      # 11) Create a dedicated CI author and issue an Application Password (used for REST auth).
+      # 11) Create a dedicated CI author and issue an Application Password (for REST auth).
       - name: Create CI author + Application Password
         id: app
         run: |
@@ -101,9 +114,20 @@ jobs:
           echo "wp_user=ci-poster" >> "$GITHUB_OUTPUT"
           echo "wp_app_password=$APP" >> "$GITHUB_OUTPUT"
 
-      # 🔍 Step 12: Diagnostics before REST smoke test
+      # 12) Quick internal REST probe via WP runtime (no HTTP) to catch PHP fatals early.
+      - name: WP REST sanity (CLI)
+        run: |
+          echo "=== REST status via WP-CLI ==="
+          wp eval '
+            $r = rest_do_request( new WP_REST_Request("GET","/") );
+            echo "status=" . $r->get_status() . PHP_EOL;
+            if ($r->is_error()) { $e = $r->as_error(); echo $e->get_error_message() . PHP_EOL; }
+          ' --path=wordpress
+
+      # 13) Diagnostics with robust REST check (non-pretty route; dumps logs on failure).
       - name: Diagnostics (dump WP state)
         run: |
+          set -e
           echo "=== PHP version ==="; php -v
           echo "=== WP version ==="; wp core version --path=wordpress
           echo "=== Users ==="; wp user list --path=wordpress --fields=ID,user_login,user_email,roles
@@ -111,23 +135,27 @@ jobs:
           echo "=== Plugins ==="; wp plugin list --path=wordpress || true
           echo "=== DB check ==="; wp db check --path=wordpress
 
-          echo "=== Site root (curl) ==="
+          echo "=== Site root (curl HEAD) ==="
           curl -s -I http://127.0.0.1:8081/ | head -n 20
 
           echo "=== REST index (non-pretty) ==="
-          curl -fsS 'http://127.0.0.1:8081/index.php?rest_route=/' \
-            -H 'Accept: application/json' \
-            -o /tmp/rest.json -D /tmp/rest.h
+          URL='http://127.0.0.1:8081/index.php?rest_route=/'
+          if ! curl -fsS -D /tmp/rest.h -H 'Accept: application/json' "$URL" -o /tmp/rest.json; then
+            echo ">>> PHP built-in server log:"; tail -n +1 server.log || true
+            echo ">>> wp-content/debug.log:"; tail -n +1 wordpress/wp-content/debug.log || true
+            exit 1
+          fi
           grep -i '^content-type:' /tmp/rest.h || true
           jq -e . /tmp/rest.json > /dev/null && jq . /tmp/rest.json
 
-
+      # 14) REST smoke test (create a post) via non-pretty route.
       - name: REST smoke test
         env:
           WP_BASE_URL: ${{ steps.app.outputs.wp_base_url }}
           WP_USER: ${{ steps.app.outputs.wp_user }}
           WP_APP_PASSWORD: ${{ steps.app.outputs.wp_app_password }}
         run: |
+          set -e
           curl -fsS -X POST "$WP_BASE_URL/index.php?rest_route=/wp/v2/posts" \
             -u "$WP_USER:$WP_APP_PASSWORD" \
             -H "Content-Type: application/json" \
