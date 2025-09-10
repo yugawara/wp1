@@ -210,32 +210,28 @@ jobs:
           ADMIN_USER="${{ steps.app.outputs.wp_admin_user }}"
           ADMIN_APP="${{ steps.app.outputs.wp_admin_app_password }}"
 
-          echo "A) Show where settings (no slash) redirects"
-          curl -fsSI "$BASE/wp-json/wp/v2/settings" | sed -n '1,10p' || true
+          get_code() { curl -sS -o /dev/null -w '%{http_code}' "$@"; }  # note: no -f
 
-          echo "B) Try settings with trailing slash (expect 200)"
-          code=$(curl -fsS -o /dev/null -w '%{http_code}' -u "$ADMIN_USER:$ADMIN_APP" \
-                "$BASE/wp-json/wp/v2/settings/")
-          echo "status=$code"
+          echo "A) Settings (no slash) — expect 301"
+          code=$(get_code -I "$BASE/wp-json/wp/v2/settings")
+          test "$code" = "301"
+
+          echo "B) Settings (trailing slash) — expect 200"
+          code=$(get_code -u "$ADMIN_USER:$ADMIN_APP" "$BASE/wp-json/wp/v2/settings/")
           test "$code" = "200"
 
-          echo "C) Try me with trailing slash (expect 200)"
-          code=$(curl -fsS -o /dev/null -w '%{http_code}' -u "$ADMIN_USER:$ADMIN_APP" \
-                "$BASE/wp-json/wp/v2/users/me/")
-          echo "status=$code"
+          echo "C) Me (trailing slash) — expect 200"
+          code=$(get_code -u "$ADMIN_USER:$ADMIN_APP" "$BASE/wp-json/wp/v2/users/me/")
           test "$code" = "200"
 
-          echo "D) Non-pretty settings (expect 200; never redirects)"
-          code=$(curl -fsS -o /dev/null -w '%{http_code}' -u "$ADMIN_USER:$ADMIN_APP" \
-                "$BASE/index.php?rest_route=/wp/v2/settings")
-          echo "status=$code"
+          echo "D) Settings non-pretty (with trailing slash) — expect 200"
+          code=$(get_code -u "$ADMIN_USER:$ADMIN_APP" "$BASE/index.php?rest_route=/wp/v2/settings/")
           test "$code" = "200"
 
-          echo "E) Non-pretty me (expect 200; never redirects)"
-          code=$(curl -fsS -o /dev/null -w '%{http_code}' -u "$ADMIN_USER:$ADMIN_APP" \
-                "$BASE/index.php?rest_route=/wp/v2/users/me")
-          echo "status=$code"
+          echo "E) Me non-pretty (with trailing slash) — expect 200"
+          code=$(get_code -u "$ADMIN_USER:$ADMIN_APP" "$BASE/index.php?rest_route=/wp/v2/users/me/")
           test "$code" = "200"
+
 
       # ----- .NET: plain runner, user-local install (no sudo in action) -----
 
