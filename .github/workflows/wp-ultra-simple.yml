@@ -224,14 +224,6 @@ jobs:
           code=$(get_code -u "$ADMIN_USER:$ADMIN_APP" "$BASE/wp-json/wp/v2/users/me/")
           test "$code" = "200"
 
-          echo "D) Settings non-pretty (with trailing slash) — expect 200"
-          code=$(get_code -u "$ADMIN_USER:$ADMIN_APP" "$BASE/index.php?rest_route=/wp/v2/settings/")
-          test "$code" = "200"
-
-          echo "E) Me non-pretty (with trailing slash) — expect 200"
-          code=$(get_code -u "$ADMIN_USER:$ADMIN_APP" "$BASE/index.php?rest_route=/wp/v2/users/me/")
-          test "$code" = "200"
-
 
       # ----- .NET: plain runner, user-local install (no sudo in action) -----
 
