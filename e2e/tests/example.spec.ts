@@ -6,7 +6,7 @@ test('has title', async ({ page }) => {
   // Expect a title "to contain" a substring.
   await expect(page).toHaveTitle(/wptest/);
 });
-test.skip('has title2', async ({ page }) => {
+test('has title2', async ({ page }) => {
   await page.goto('/blazorapp');
 
   // Expect a title "to contain" a substring.
