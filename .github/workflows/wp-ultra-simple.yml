@@ -172,6 +172,12 @@ jobs:
           curl -I https://aspnet.lan:8443/
           curl -fsS https://aspnet.lan:8443/ | head -n 20
 
+      - name: Verify REST pretty route works
+        run: |
+          set -euxo pipefail
+          curl -fsSI https://aspnet.lan:8443/wp-json/
+          curl -fsS  https://aspnet.lan:8443/wp-json/wp/v2 | jq '.namespace'
+
       - name: Upload cert artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -243,29 +249,26 @@ jobs:
       - name: Build (Release)
         run: dotnet build Workspace.sln -c Release --no-restore
 
-      # Run ALL tests in the solution (Editor.Tests + BlazorWP.Tests)
       - name: Run all tests (Workspace.sln)
         env:
-          WP_BASE_URL: ${{ steps.app.outputs.wp_base_url }}
-          WordPress__Url: ${{ steps.app.outputs.wp_base_url }}
-          # use admin creds for tests
+          # ✅ point tests at Apache (pretty routes work)
+          WP_BASE_URL: https://aspnet.lan:8443
+          WordPress__Url: https://aspnet.lan:8443
           WP_USER: ${{ steps.app.outputs.wp_admin_user }}
           WP_USERNAME: ${{ steps.app.outputs.wp_admin_user }}
           WP_APP_PASSWORD: ${{ steps.app.outputs.wp_admin_app_password }}
           DOTNET_ENVIRONMENT: Development
           DOTNET_CLI_TELEMETRY_OPTOUT: 1
-        run: |
-          dotnet test Workspace.sln -c Release --no-build --no-restore -m:1
+        run: dotnet test Workspace.sln -c Release --no-build --no-restore -m:1
 
       - name: Run E2E/Integration tests (if any)
         if: ${{ hashFiles('BlazorWP.E2E/*.csproj') != '' }}
         env:
-          WP_BASE_URL: ${{ steps.app.outputs.wp_base_url }}
-          WordPress__Url: ${{ steps.app.outputs.wp_base_url }}
+          WP_BASE_URL: https://aspnet.lan:8443
+          WordPress__Url: https://aspnet.lan:8443
           WP_USER: ${{ steps.app.outputs.wp_admin_user }}
           WP_USERNAME: ${{ steps.app.outputs.wp_admin_user }}
           WP_APP_PASSWORD: ${{ steps.app.outputs.wp_admin_app_password }}
           DOTNET_ENVIRONMENT: Development
           DOTNET_CLI_TELEMETRY_OPTOUT: 1
-        run: |
-          dotnet test BlazorWP.E2E/BlazorWP.E2E.csproj -c Release --no-build --no-restore --logger "trx;LogFileName=e2e.trx"
+        run: dotnet test BlazorWP.E2E/BlazorWP.E2E.csproj -c Release --no-build --no-restore --logger "trx;LogFileName=e2e.trx"
