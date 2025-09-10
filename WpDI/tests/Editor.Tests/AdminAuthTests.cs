@@ -48,8 +48,9 @@ public class AdminAuthTests
         Assert.False(string.IsNullOrWhiteSpace(baseUrl), "WP_BASE_URL is not set.");
 
         using var http = NewClient(baseUrl!);
-        var resp = await http.GetAsync("/wp-json/");
-        resp.StatusCode.Should().Be(HttpStatusCode.OK);
+        var resp = await http.GetAsync("/wp-json/wp/v2/settings/");
+        resp.StatusCode.Should().BeOneOf(HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden);
+
     }
 
     [Fact]
@@ -76,9 +77,8 @@ public class AdminAuthTests
         using var http = NewClient(baseUrl);
         SetBasicAuth(http, user, pass);
 
-        var resp = await http.GetAsync("/wp-json/wp/v2/settings");
+        var resp = await http.GetAsync("/wp-json/wp/v2/settings/");
         resp.StatusCode.Should().Be(HttpStatusCode.OK);
-
         var json = await resp.Content.ReadAsStringAsync();
         json.Should().Contain("\"title\"");
     }
@@ -91,7 +91,7 @@ public class AdminAuthTests
         using var http = NewClient(baseUrl);
         SetBasicAuth(http, user, pass);
 
-        var resp = await http.GetAsync("/wp-json/wp/v2/users/me");
+        var resp = await http.GetAsync("/wp-json/wp/v2/users/me/");
         resp.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var body = await resp.Content.ReadAsStringAsync();
