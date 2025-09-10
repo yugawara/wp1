@@ -150,14 +150,13 @@ jobs:
           echo "--- Shared publish dir (/srv/shared/aspnet/cert) ---"
           sudo ls -la /srv/shared/aspnet/cert || true
 
-
       - name: Setup Apache (direct, no proxy) for WordPress
         shell: bash
         env:
           DOMAIN: aspnet.lan
           PORT: '8443'
           WP_DIR: ${{ github.workspace }}/wordpress
-          CERT_DIR: ${{ github.workspace }}/BlazorWP/cert/
+          CERT_DIR: ${{ github.workspace }}/BlazorWP/cert
         run: BlazorWP/scripts/setup-apache-direct.sh
 
       - name: HTTPS smoke test (Apache TLS → WordPress)
