@@ -3,6 +3,7 @@
 set -euo pipefail
 
 DOMAIN="${DOMAIN:-aspnet.lan}"
+DOMAIN_ALIASES="${DOMAIN_ALIASES:-}"   # space-separated, e.g. "wp.lan other.lan"
 PORT="${PORT:-8443}"
 SRC_WP_DIR="${WP_DIR:-$GITHUB_WORKSPACE/wordpress}"           # source in workspace
 DST_WP_DIR="/var/www/wordpress"                                # final docroot
@@ -33,16 +34,21 @@ sudo apt-get install -y apache2 libapache2-mod-php8.3
 sudo a2enmod rewrite headers ssl mime dir
 
 # Ensure host resolves locally
-if ! grep -qE "^[^#]*\s$DOMAIN(\s|$)" /etc/hosts; then
+if ! grep -qE "^[^#]*\\s$DOMAIN(\\s|$)" /etc/hosts; then
   echo "127.0.0.1  $DOMAIN" | sudo tee -a /etc/hosts >/dev/null
 fi
+if [[ -n "$DOMAIN_ALIASES" ]]; then
+  for h in $DOMAIN_ALIASES; do
+    grep -qE "^[^#]*\\s$h(\\s|$)" /etc/hosts || echo "127.0.0.1  $h" | sudo tee -a /etc/hosts >/dev/null
+  done
+tfi
 
 # Default .htaccess (pretty permalinks/REST)
 cat > "$SRC_WP_DIR/.htaccess" <<'HT'
 <IfModule mod_rewrite.c>
 RewriteEngine On
 RewriteBase /
-RewriteRule ^index\.php$ - [L]
+RewriteRule ^index\\.php$ - [L]
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule . /index.php [L]
@@ -60,6 +66,7 @@ grep -q "Listen $PORT" /etc/apache2/ports.conf || echo "Listen $PORT" | sudo tee
 sudo tee /etc/apache2/sites-available/wp-ssl.conf >/dev/null <<CONF
 <VirtualHost *:${PORT}>
   ServerName ${DOMAIN}
+  $( [[ -n "$DOMAIN_ALIASES" ]] && echo "ServerAlias ${DOMAIN_ALIASES}" )
   DocumentRoot "${DST_WP_DIR}"
 
   SSLEngine on
@@ -77,10 +84,6 @@ sudo tee /etc/apache2/sites-available/wp-ssl.conf >/dev/null <<CONF
     Options -Indexes
   </Directory>
 
-  <FilesMatch "\.php$">
-    SetHandler application/x-httpd-php
-  </FilesMatch>
-
   ErrorLog  \${APACHE_LOG_DIR}/wp-ssl-error.log
   CustomLog \${APACHE_LOG_DIR}/wp-ssl-access.log combined
 </VirtualHost>
@@ -94,4 +97,4 @@ sudo systemctl restart apache2
 sudo -u www-data -E wp option update permalink_structure '/%postname%/' --path="$DST_WP_DIR"
 sudo -u www-data -E wp rewrite flush --hard --path="$DST_WP_DIR"
 
-echo "== Apache is serving WordPress at https://${DOMAIN}:${PORT}/ =="
+echo "== Apache is serving WordPress at https://${DOMAIN}:${PORT}/ (aliases: ${DOMAIN_ALIASES:-none}) =="
