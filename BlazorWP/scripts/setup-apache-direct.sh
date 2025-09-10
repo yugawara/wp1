@@ -4,39 +4,41 @@ set -euo pipefail
 
 DOMAIN="${DOMAIN:-aspnet.lan}"
 PORT="${PORT:-8443}"
-WP_DIR="${WP_DIR:-$GITHUB_WORKSPACE/wordpress}"
+SRC_WP_DIR="${WP_DIR:-$GITHUB_WORKSPACE/wordpress}"           # source in workspace
+DST_WP_DIR="/var/www/wordpress"                                # final docroot
 CERT_DIR="${CERT_DIR:-$GITHUB_WORKSPACE/BlazorWP/cert}"
 
-# Allow explicit overrides, otherwise use aspnet.lan.* generated files
+# Use your generated cert names
 CRT="${CERT_CERT_FILE:-$CERT_DIR/aspnet.lan.crt}"
 KEY="${CERT_KEY_FILE:-$CERT_DIR/aspnet.lan.key}"
 CHAIN="${CERT_CHAIN_FILE:-$CERT_DIR/aspnet.lan-ca.crt}"
 
 echo "== setup-apache-direct =="
 echo "DOMAIN=$DOMAIN  PORT=$PORT"
-echo "WP_DIR=$WP_DIR"
+echo "SRC_WP_DIR=$SRC_WP_DIR"
+echo "DST_WP_DIR=$DST_WP_DIR"
 echo "CERT_DIR=$CERT_DIR"
 echo "CRT=$CRT"
 echo "KEY=$KEY"
 echo "CHAIN=$CHAIN"
 
-[[ -d "$WP_DIR" ]] || { echo "Missing WP_DIR: $WP_DIR" >&2; exit 1; }
+[[ -d "$SRC_WP_DIR" ]] || { echo "Missing source WP_DIR: $SRC_WP_DIR" >&2; exit 1; }
 [[ -f "$CRT" && -f "$KEY" && -f "$CHAIN" ]] || {
   echo "Missing certs: $CRT / $KEY / $CHAIN" >&2; exit 1;
 }
 
+# Install Apache + mod_php
 sudo apt-get update -y
 sudo apt-get install -y apache2 libapache2-mod-php8.3
 sudo a2enmod rewrite headers ssl mime dir
-sudo chown -R "$USER":"$USER" "$GITHUB_WORKSPACE"
 
-# Ensure the runner resolves aspnet.lan
+# Ensure host resolves locally
 if ! grep -qE "^[^#]*\s$DOMAIN(\s|$)" /etc/hosts; then
   echo "127.0.0.1  $DOMAIN" | sudo tee -a /etc/hosts >/dev/null
 fi
 
-# Default WordPress .htaccess for pretty permalinks/REST
-cat > "$WP_DIR/.htaccess" <<'HT'
+# Default .htaccess (pretty permalinks/REST)
+cat > "$SRC_WP_DIR/.htaccess" <<'HT'
 <IfModule mod_rewrite.c>
 RewriteEngine On
 RewriteBase /
@@ -47,16 +49,18 @@ RewriteRule . /index.php [L]
 </IfModule>
 HT
 
-# Listen on custom HTTPS port (avoid duplicate lines)
-if ! grep -q "Listen $PORT" /etc/apache2/ports.conf; then
-  echo "Listen $PORT" | sudo tee -a /etc/apache2/ports.conf >/dev/null
-fi
+# Deploy to /var/www/wordpress (clean, predictable perms)
+sudo rsync -a --delete "$SRC_WP_DIR/" "$DST_WP_DIR/"
+sudo chown -R www-data:www-data "$DST_WP_DIR"
 
-# SSL vhost serving WordPress directly
+# Listen on custom HTTPS port (avoid duplicate)
+grep -q "Listen $PORT" /etc/apache2/ports.conf || echo "Listen $PORT" | sudo tee -a /etc/apache2/ports.conf >/dev/null
+
+# SSL vhost
 sudo tee /etc/apache2/sites-available/wp-ssl.conf >/dev/null <<CONF
 <VirtualHost *:${PORT}>
   ServerName ${DOMAIN}
-  DocumentRoot "${WP_DIR}"
+  DocumentRoot "${DST_WP_DIR}"
 
   SSLEngine on
   SSLCertificateFile      "${CRT}"
@@ -66,7 +70,7 @@ sudo tee /etc/apache2/sites-available/wp-ssl.conf >/dev/null <<CONF
   # Pass Basic Auth header for WP Application Passwords
   SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=\$1
 
-  <Directory "${WP_DIR}">
+  <Directory "${DST_WP_DIR}">
     AllowOverride All
     Require all granted
     DirectoryIndex index.php
@@ -86,8 +90,8 @@ sudo a2ensite wp-ssl.conf
 sudo a2dissite 000-default.conf || true
 sudo systemctl restart apache2
 
-# Ensure pretty permalinks so /wp-json/... just works
-wp option update permalink_structure '/%postname%/' --path="$WP_DIR"
-wp rewrite flush --hard --path="$WP_DIR"
+# Flush permalinks as www-data (docroot owned by Apache)
+sudo -u www-data -E wp option update permalink_structure '/%postname%/' --path="$DST_WP_DIR"
+sudo -u www-data -E wp rewrite flush --hard --path="$DST_WP_DIR"
 
 echo "== Apache is serving WordPress at https://${DOMAIN}:${PORT}/ =="
