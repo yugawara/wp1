@@ -81,7 +81,7 @@ sudo tee "${VHOST_PATH}" >/dev/null <<APACHECONF
     RequestHeader set X-Forwarded-Proto "https"
 
     # Pretty REST → non-pretty for PHP built-in server
-    ProxyPassMatch ^/wp-json/(.*)$ ${BACKEND}/index.php?rest_route=/$1
+    ProxyPassMatch ^/wp-json/(.*)$ ${BACKEND}/index.php?rest_route=/\$1
 
     # Everything else straight through
     ProxyPass        / ${BACKEND}/
