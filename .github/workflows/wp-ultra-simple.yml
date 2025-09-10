@@ -77,11 +77,12 @@ jobs:
       - name: Install WordPress
         run: |
           wp core install --path=wordpress \
-            --url="http://127.0.0.1:8081" \
+            --url="https://aspnet.lan:8443" \
             --title="CI Test Site" \
             --admin_user=admin \
             --admin_password=ChangeMe! \
             --admin_email=admin@example.com
+
 
       - name: Start PHP development server (cd into wordpress)
         run: |
@@ -97,12 +98,13 @@ jobs:
           # admin for tests
           ADMIN_APP=$(wp user application-password create admin gha --porcelain --path=wordpress)
           {
-            echo "wp_base_url=http://127.0.0.1:8081"
+            echo "wp_base_url=https://aspnet.lan:8443"
             echo "wp_user=ci-poster"
             echo "wp_app_password=$CI_APP"
             echo "wp_admin_user=admin"
             echo "wp_admin_app_password=$ADMIN_APP"
           } >> "$GITHUB_OUTPUT"
+
 
       - name: WP REST sanity (CLI, bypass HTTP)
         run: |
