@@ -226,6 +226,11 @@ jobs:
 
       - name: REST sanity checks
         run: BlazorWP/scripts/check-wp-rest.sh
+        env:
+          WP_BASE_URL: ${{ steps.app.outputs.wp_base_url }}
+          WP_USERNAME: ${{ steps.app.outputs.wp_admin_user }}
+          WP_APP_PASSWORD: ${{ steps.app.outputs.wp_admin_app_password }}
+
 
       # ----- .NET: plain runner, user-local install (no sudo in action) -----
 
