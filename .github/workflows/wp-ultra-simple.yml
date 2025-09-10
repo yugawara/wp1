@@ -214,7 +214,7 @@ jobs:
       - name: REST sanity checks
         env:
           WP_BASE_URL: ${{ env.WP_BASE_URL }}
-          WP_USERNAME: ${{ env.WP_USERNAME }}
+          WP_USER: ${{ env.WP_USER }}
           WP_APP_PASSWORD: ${{ env.WP_APP_PASSWORD }}
         run: BlazorWP/scripts/check-wp-rest.sh
 
@@ -297,7 +297,6 @@ jobs:
           cache: 'npm'
           cache-dependency-path: e2e/package-lock.json
 
-      # (Optional but recommended) Cache Playwright browser binaries
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:
@@ -310,18 +309,22 @@ jobs:
         working-directory: e2e
         run: npm ci
 
-      # Install only Chromium and required system deps
-      - name: Install Playwright Chromium (with deps)
-        run: |
-          npx playwright install-deps chromium
-          npx playwright install chromium
+      # Install only Chromium system deps (run inside e2e so Playwright sees package.json)
+      - name: Install Playwright Chromium deps
+        working-directory: e2e
+        run: npx playwright install-deps chromium
+
+      # Download only Chromium browser (again inside e2e/)
+      - name: Install Playwright Chromium
+        working-directory: e2e
+        run: npx playwright install chromium
 
       # Run only the Chromium project
       - name: Run Playwright tests (Chromium only)
         working-directory: e2e
         env:
           WP_BASE_URL: ${{ env.WP_BASE_URL }}
-          WP_USER: ${{ env.WP_USERNAME }}
+          WP_USER: ${{ env.WP_USER }}
           WP_APP_PASSWORD: ${{ env.WP_APP_PASSWORD }}
           CI: "1"
         run: npx playwright test --project=chromium
