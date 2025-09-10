@@ -224,37 +224,8 @@ jobs:
           code=$(get_code -u "$ADMIN_USER:$ADMIN_APP" "$BASE/wp-json/wp/v2/users/me/")
           test "$code" = "200"
 
-      - name: REST parity checks (match local behavior)
-        shell: bash
-        env:
-          BASE: ${{ steps.app.outputs.wp_base_url }}
-          ADMIN_USER: ${{ steps.app.outputs.wp_admin_user }}
-          ADMIN_APP: ${{ steps.app.outputs.wp_admin_app_password }}
-        run: |
-          set -euxo pipefail
-
-          echo ">>> A) Site root should be HTML (not JSON)"
-          html="$(curl -ks "$BASE/")"
-          grep -qi "<!DOCTYPE html" <<<"$html"
-
-          echo
-          echo ">>> B) REST index should be JSON (has namespaces)"
-          curl -ks -H 'Accept: application/json' "$BASE/wp-json/" | jq -e 'has("namespaces")'
-
-          echo
-          echo ">>> C) /users/me should return id+name when authed"
-          me="$(curl -ks -u "$ADMIN_USER:$ADMIN_APP" -H 'Accept: application/json' "$BASE/wp-json/wp/v2/users/me/")"
-          jq -e '.id and .name' <<<"$me" >/dev/null
-
-          echo
-          echo ">>> D) /settings should return title when authed"
-          settings="$(curl -ks -u "$ADMIN_USER:$ADMIN_APP" -H 'Accept: application/json' "$BASE/wp-json/wp/v2/settings/")"
-          jq -e '.title' <<<"$settings" >/dev/null
-
-          echo
-          echo ">>> E) Canonical redirect behavior (no slash => 301)"
-          code=$(curl -sS -o /dev/null -w '%{http_code}' -I "$BASE/wp-json/wp/v2/settings")
-          test "$code" = "301"
+      - name: REST sanity checks
+        run: BlazorWP/scripts/check-wp-rest.sh
 
       # ----- .NET: plain runner, user-local install (no sudo in action) -----
 
