@@ -194,29 +194,8 @@ jobs:
             -d '{"title":"Hello from CI","status":"publish","content":"<p>It works 🎉</p>"}' \
           | jq .
 
-      - name: Assert REST endpoints (canonical vs variants)
-        run: |
-          set -euxo pipefail
-          BASE="https://aspnet.lan:8443"
-          ADMIN_USER="${{ steps.app.outputs.wp_admin_user }}"
-          ADMIN_APP="${{ steps.app.outputs.wp_admin_app_password }}"
-
-          get_code() { curl -sS -o /dev/null -w '%{http_code}' "$@"; }  # note: no -f
-
-          echo "A) Settings (no slash) — expect 301"
-          code=$(get_code -I "$BASE/wp-json/wp/v2/settings")
-          test "$code" = "301"
-
-          echo "B) Settings (trailing slash) — expect 200"
-          code=$(get_code -u "$ADMIN_USER:$ADMIN_APP" "$BASE/wp-json/wp/v2/settings/")
-          test "$code" = "200"
-
-          echo "C) Me (trailing slash) — expect 200"
-          code=$(get_code -u "$ADMIN_USER:$ADMIN_APP" "$BASE/wp-json/wp/v2/users/me/")
-          test "$code" = "200"
-
       - name: REST sanity checks
-        run: BlazorWP/scripts/check-wp-rest.sh
+        run: STRICT_CANONICAL=1 BlazorWP/scripts/check-wp-rest.sh
         env:
           WP_BASE_URL: ${{ steps.app.outputs.wp_base_url }}
           WP_USERNAME: ${{ steps.app.outputs.wp_admin_user }}

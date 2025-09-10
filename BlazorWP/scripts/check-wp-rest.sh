@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
+# BlazorWP/scripts/check-wp-rest.sh
 set -euo pipefail
 
-: "${WP_BASE_URL:?Need WP_BASE_URL}"
+: "${WP_BASE_URL:?Need WP_BASE_URL (e.g. https://aspnet.lan:8443 or https://wp.lan)}"
 : "${WP_USERNAME:?Need WP_USERNAME}"
 : "${WP_APP_PASSWORD:?Need WP_APP_PASSWORD}"
 
@@ -9,86 +10,83 @@ BASE="$WP_BASE_URL"
 USER="$WP_USERNAME"
 PASS="$WP_APP_PASSWORD"
 
-ok(){ echo "✅ $1"; }
-fail(){ echo "❌ $1"; exit 1; }
-peek(){ echo "$1" | sed -n '1,3p'; }      # show first few lines of a blob
-hdr(){ echo "$1" | tr -d '\r' | sed -n '1,12p'; }
+# behavior tuning (optional)
+STRICT_CANONICAL="${STRICT_CANONICAL:-0}"   # 1 => require 301/308 for no-slash; 0 => allow 401/403 too
+SHOW_DIAG="${SHOW_DIAG:-1}"                 # print brief diagnostics on failures
 
-echo "== A) Root =="
+ok()   { echo "✅ $1"; }
+fail() { echo "❌ $1"; exit 1; }
+peek() { sed -n '1,8p'; }
+hdr()  { tr -d '\r' | sed -n '1,12p'; }
+
+code_of() { curl -ks -o /dev/null -w '%{http_code}' "$@"; }
+
+echo "== A) Root should be HTML =="
 html=$(curl -ks "$BASE/")
-grep -qi "<!DOCTYPE html" <<<"$html" && ok "Root serves HTML" || { peek "$html"; fail "Root did not look like HTML"; }
+if echo "$html" | grep -qi "<!DOCTYPE html"; then
+  ok "Root serves HTML"
+else
+  [ "$SHOW_DIAG" = "1" ] && echo "$html" | peek
+  fail "Root did not look like HTML"
+fi
 
-echo "== B) REST index =="
-# First look at status + headers (no body to jq if not 200)
-resp_h=$(curl -ksI -H 'Accept: application/json' "$BASE/wp-json/")
-code=$(printf '%s\n' "$resp_h" | awk 'NR==1{print $2}')
-loc=$(printf '%s\n' "$resp_h" | grep -i '^Location:' || true)
+echo "== B) /wp-json/ index (public JSON) =="
+# check headers first so we can show status/headers on error
+h=$(curl -ksI -H 'Accept: application/json' "$BASE/wp-json/")
+status=$(printf '%s\n' "$h" | awk 'NR==1{print $2}')
+if [ "$status" = "200" ]; then
+  body=$(curl -ks -H 'Accept: application/json' "$BASE/wp-json/")
+  if jq -e 'has("namespaces")' >/dev/null 2>&1 <<<"$body"; then
+    ok "/wp-json/ returns JSON with namespaces"
+  else
+    [ "$SHOW_DIAG" = "1" ] && { echo "--- headers ---"; printf '%s\n' "$h" | hdr; echo "--- body ---"; printf '%s\n' "$body" | peek; }
+    fail "/wp-json/ not valid JSON"
+  fi
+else
+  [ "$SHOW_DIAG" = "1" ] && { echo "--- headers ---"; printf '%s\n' "$h" | hdr; }
+  fail "Unexpected status from /wp-json/: $status"
+fi
 
-case "$code" in
-  200)
-    body=$(curl -ks -H 'Accept: application/json' "$BASE/wp-json/")
-    if jq -e 'has("namespaces")' <<<"$body" >/dev/null 2>&1; then
-      ok "/wp-json/ returns JSON"
-    else
-      echo "--- /wp-json/ body (first lines) ---"; peek "$body"
-      echo "--- /wp-json/ headers ---"; hdr "$resp_h"
-      fail "/wp-json/ was not valid JSON"
-    fi
-    ;;
-  301|308)
-    echo "↪ /wp-json/ redirected ($code) $loc"
-    # follow once
-    target=$(printf '%s\n' "$loc" | awk '{print $2}')
-    body=$(curl -ks -H 'Accept: application/json' "$target")
-    if jq -e 'has("namespaces")' <<<"$body" >/dev/null 2>&1; then
-      ok "redirect target returns JSON"
-    else
-      echo "--- redirect target body (first lines) ---"; peek "$body"
-      echo "--- /wp-json/ headers ---"; hdr "$resp_h"
-      fail "redirect target was not valid JSON"
-    fi
-    ;;
-  *)
-    echo "--- /wp-json/ headers ---"; hdr "$resp_h"
-    fail "unexpected status from /wp-json/: $code"
-    ;;
-esac
-
-echo "== C) /users/me (auth) =="
+echo "== C) /wp-json/wp/v2/users/me/ (authed JSON) =="
 me=$(curl -ks -u "$USER:$PASS" -H 'Accept: application/json' "$BASE/wp-json/wp/v2/users/me/")
-if jq -e '.id and .name' <<<"$me" >/dev/null 2>&1; then
-  ok "users/me returns id+name"
+if jq -e '.id and .name' >/dev/null 2>&1 <<<"$me"; then
+  ok "users/me returned id+name"
 else
-  echo "--- users/me body ---"; peek "$me"
-  fail "users/me bad"
+  [ "$SHOW_DIAG" = "1" ] && { echo "--- body ---"; printf '%s\n' "$me" | peek; }
+  fail "users/me missing id/name"
 fi
 
-echo "== D) /settings (auth) =="
+echo "== D) /wp-json/wp/v2/settings/ (authed JSON) =="
 settings=$(curl -ks -u "$USER:$PASS" -H 'Accept: application/json' "$BASE/wp-json/wp/v2/settings/")
-if jq -e '.title' <<<"$settings" >/dev/null 2>&1; then
-  ok "settings returns title"
+if jq -e '.title' >/dev/null 2>&1 <<<"$settings"; then
+  ok "settings returned title"
 else
-  echo "--- settings body ---"; peek "$settings"
-  fail "settings bad"
+  [ "$SHOW_DIAG" = "1" ] && { echo "--- body ---"; printf '%s\n' "$settings" | peek; }
+  fail "settings missing title"
 fi
 
-echo "== E) /settings (no slash) behavior =="
-ns_h=$(curl -ksI "$BASE/wp-json/wp/v2/settings")
-ns_code=$(printf '%s\n' "$ns_h" | awk 'NR==1{print $2}')
-case "$ns_code" in
-  301|308) ok "no-slash redirected ($ns_code)";;
-  401|403) ok "no-slash returned auth status ($ns_code)";;
-  *)
-    echo "--- headers ---"; hdr "$ns_h"
-    fail "expected 301/308/401/403, got $ns_code"
-    ;;
-esac
+echo "== E) /wp-json/wp/v2/settings (no slash) canonical behavior =="
+ns_code=$(code_of "$BASE/wp-json/wp/v2/settings")  # use GET (not HEAD)
+if [ "$STRICT_CANONICAL" = "1" ]; then
+  case "$ns_code" in
+    301|308) ok "no-slash redirected ($ns_code) to trailing slash (STRICT)";;
+    *)       fail "Expected 301/308 (STRICT), got $ns_code";;
+  esac
+else
+  case "$ns_code" in
+    301|308) ok "no-slash redirected ($ns_code) to trailing slash";;
+    401|403) ok "no-slash returned auth challenge ($ns_code) — acceptable";;
+    *)       fail "Expected 301/308/401/403, got $ns_code";;
+  esac
+fi
 
-echo "== F) /settings (bad creds) =="
-bc_code=$(curl -ks -o /dev/null -w '%{http_code}' \
-          -u "$USER:DefinitelyWrongPassword123!" \
-          -H 'Accept: application/json' "$BASE/wp-json/wp/v2/settings/")
-[[ "$bc_code" == "401" || "$bc_code" == "403" ]] \
-  && ok "bad creds return $bc_code" || fail "expected 401/403, got $bc_code"
+echo "== F) /wp-json/wp/v2/settings/ (bad creds) =="
+bad_code=$(curl -ks -o /dev/null -w '%{http_code}' \
+           -u "$USER:DefinitelyWrongPassword123!" \
+           -H 'Accept: application/json' "$BASE/wp-json/wp/v2/settings/")
+case "$bad_code" in
+  401|403) ok "bad creds returned $bad_code";;
+  *)       fail "Expected 401/403 for bad creds, got $bad_code";;
+esac
 
 echo "🎉 All checks passed"
