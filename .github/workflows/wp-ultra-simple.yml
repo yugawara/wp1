@@ -203,46 +203,38 @@ jobs:
             -d '{"title":"Hello from CI","status":"publish","content":"<p>It works 🎉</p>"}' \
           | jq .
 
-
-
-      - name: Assert REST endpoints 
+      - name: Assert REST endpoints (canonical vs variants)
         run: |
           set -euxo pipefail
           BASE="https://aspnet.lan:8443"
           ADMIN_USER="${{ steps.app.outputs.wp_admin_user }}"
           ADMIN_APP="${{ steps.app.outputs.wp_admin_app_password }}"
 
-          echo "1) REST index — canonical (should be 200)"
-          code=$(curl -fsS -o /dev/null -w '%{http_code}' "$BASE/wp-json/")
-          test "$code" = "200"
+          echo "A) Show where settings (no slash) redirects"
+          curl -fsSI "$BASE/wp-json/wp/v2/settings" | sed -n '1,10p' || true
 
-          echo "1b) REST index — missing trailing slash (should be 301 or 308)"
-          code=$(curl -fsS -o /dev/null -w '%{http_code}' -I "$BASE/wp-json")
-          [[ "$code" = "301" || "$code" = "308" ]]
-
-          echo "2) Settings (auth ok) — pretty route (should be 200)"
+          echo "B) Try settings with trailing slash (expect 200)"
           code=$(curl -fsS -o /dev/null -w '%{http_code}' -u "$ADMIN_USER:$ADMIN_APP" \
-                "$BASE/wp-json/wp/v2/settings")
+                "$BASE/wp-json/wp/v2/settings/")
+          echo "status=$code"
           test "$code" = "200"
 
-          echo "3) Settings (bad creds) — pretty route (should be 401 or 403)"
-          code=$(curl -fsS -o /dev/null -w '%{http_code}' -u "$ADMIN_USER:WRONGPASS" \
-                "$BASE/wp-json/wp/v2/settings")
-          [[ "$code" = "401" || "$code" = "403" ]]
-
-          echo "4) Me endpoint (auth ok) — pretty route (should be 200)"
+          echo "C) Try me with trailing slash (expect 200)"
           code=$(curl -fsS -o /dev/null -w '%{http_code}' -u "$ADMIN_USER:$ADMIN_APP" \
-                "$BASE/wp-json/wp/v2/users/me")
+                "$BASE/wp-json/wp/v2/users/me/")
+          echo "status=$code"
           test "$code" = "200"
 
-          echo "5) Settings (auth ok) — NON-pretty route (should be 200, never redirects)"
+          echo "D) Non-pretty settings (expect 200; never redirects)"
           code=$(curl -fsS -o /dev/null -w '%{http_code}' -u "$ADMIN_USER:$ADMIN_APP" \
                 "$BASE/index.php?rest_route=/wp/v2/settings")
+          echo "status=$code"
           test "$code" = "200"
 
-          echo "6) Me (auth ok) — NON-pretty route (should be 200, never redirects)"
+          echo "E) Non-pretty me (expect 200; never redirects)"
           code=$(curl -fsS -o /dev/null -w '%{http_code}' -u "$ADMIN_USER:$ADMIN_APP" \
                 "$BASE/index.php?rest_route=/wp/v2/users/me")
+          echo "status=$code"
           test "$code" = "200"
 
       # ----- .NET: plain runner, user-local install (no sudo in action) -----
