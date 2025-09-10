@@ -92,7 +92,6 @@ jobs:
         id: app
         run: |
           set -euo pipefail
-          # author for REST smoke
           wp user create ci-poster ci-poster@example.com --role=author --user_pass="$(openssl rand -base64 18)" --path=wordpress
           CI_APP=$(wp user application-password create ci-poster gha --porcelain --path=wordpress)
           # admin for tests
