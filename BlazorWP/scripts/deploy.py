@@ -78,12 +78,7 @@ def version_assets_in_html(wwwroot: Path, assets: list[Path], html_files: list[P
         except Exception:
             continue
         digest = sha256_file(a)
-        # Escape for regex
         rel_escaped = re.escape(rel_posix)
-        # Build a regex that matches:
-        #   (href|src)=["']<rel>(?P<v>\?v=[^"' ]*)?["']
-        #
-        # We capture the quote to re-use the same quote style in replacement.
         pattern = re.compile(
             rf'(href|src)\s*=\s*(["\']){rel_escaped}(?:\?v=[^"\']*)?\2',
             flags=re.IGNORECASE,
@@ -109,11 +104,12 @@ def main():
     REMOTE_HOST = require_env("Server__Host")
     REMOTE_WEBPATH = require_env("Server__RemoteBlazorDir")
 
-    # === Configuration ===
-    PROJECT_DIR = Path(__file__).resolve().parent
-    PROJECT_FILE = PROJECT_DIR / "BlazorWP.csproj"
+    # === Paths (script is in ./scripts; project root is one level up) ===
+    PROJECT_DIR = Path(__file__).resolve().parent          # .../scripts
+    ROOT_DIR = PROJECT_DIR.parent                           # project root (has BlazorWP.csproj, libman.json)
+    PROJECT_FILE = (ROOT_DIR / "BlazorWP.csproj").resolve()
 
-    PUBLISH_DIR = (PROJECT_DIR / ".." / "blazor-publish").resolve()
+    PUBLISH_DIR = (ROOT_DIR / "blazor-publish").resolve()
     WWWROOT_DIR = PUBLISH_DIR / "wwwroot"
     DESIRED_BASE = "/blazorapp/"
 
@@ -121,9 +117,9 @@ def main():
     print("→ Cleaning old publish…")
     shutil.rmtree(PUBLISH_DIR, ignore_errors=True)
 
-    # === 2) Restore client-side libraries into wwwroot/libman ===
+    # === 2) Restore client-side libraries into wwwroot/libman (libman.json at ROOT_DIR) ===
     print("→ Restoring client-side libraries…")
-    run(["libman", "restore"])
+    run(["libman", "restore"], cwd=ROOT_DIR)
 
     # === 3) Publish the project (implicit NuGet restore/build/pack) ===
     print(f"→ Publishing {PROJECT_FILE} to {PUBLISH_DIR}…")
@@ -131,6 +127,7 @@ def main():
         ["dotnet", "publish", str(PROJECT_FILE), "-c", "Release", "-o", str(PUBLISH_DIR)],
         check=False,
         capture=True,
+        cwd=ROOT_DIR,
     )
 
     # Filter out specific lines (parity with the bash version)
@@ -166,7 +163,6 @@ def main():
     print("→ Fingerprinting static assets and rewriting HTML links…")
     assets = collect_assets(WWWROOT_DIR)
     html_files = collect_html(WWWROOT_DIR)
-    # Quick log of what we’re about to fingerprint
     for a in sorted(assets):
         print(f"   • {a.relative_to(WWWROOT_DIR)}")
     version_assets_in_html(WWWROOT_DIR, assets, html_files)
