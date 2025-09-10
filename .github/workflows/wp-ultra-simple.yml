@@ -78,7 +78,7 @@ jobs:
         run: |
           wp core install --path=wordpress \
             --url="https://aspnet.lan:8443" \
-            --title="CI Test Site" \
+            --title="wptest" \
             --admin_user=admin \
             --admin_password=ChangeMe! \
             --admin_email=admin@example.com
