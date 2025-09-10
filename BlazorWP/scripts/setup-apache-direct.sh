@@ -12,7 +12,6 @@ CERT_DIR="${CERT_DIR:-$GITHUB_WORKSPACE/BlazorWP/cert}"
 # Use your generated cert names
 CRT="${CERT_CERT_FILE:-$CERT_DIR/aspnet.lan.crt}"
 KEY="${CERT_KEY_FILE:-$CERT_DIR/aspnet.lan.key}"
-CHAIN="${CERT_CHAIN_FILE:-$CERT_DIR/aspnet.lan-ca.crt}"
 
 echo "== setup-apache-direct =="
 echo "DOMAIN=$DOMAIN  PORT=$PORT"
@@ -21,17 +20,15 @@ echo "DST_WP_DIR=$DST_WP_DIR"
 echo "CERT_DIR=$CERT_DIR"
 echo "CRT=$CRT"
 echo "KEY=$KEY"
-echo "CHAIN=$CHAIN"
 
 [[ -d "$SRC_WP_DIR" ]] || { echo "Missing source WP_DIR: $SRC_WP_DIR" >&2; exit 1; }
-[[ -f "$CRT" && -f "$KEY" && -f "$CHAIN" ]] || {
-  echo "Missing certs: $CRT / $KEY / $CHAIN" >&2; exit 1;
-}
+[[ -f "$CRT" && -f "$KEY" ]] || { echo "Missing certs: $CRT / $KEY" >&2; exit 1; }
+
 
 # Install Apache + mod_php
 sudo apt-get update -y
 sudo apt-get install -y apache2 libapache2-mod-php8.3
-sudo a2enmod rewrite headers ssl mime dir
+sudo a2enmod rewrite ssl mime dir
 
 # Ensure host resolves locally
 if ! grep -qE "^[^#]*\\s$DOMAIN(\\s|$)" /etc/hosts; then
@@ -41,7 +38,7 @@ if [[ -n "$DOMAIN_ALIASES" ]]; then
   for h in $DOMAIN_ALIASES; do
     grep -qE "^[^#]*\\s$h(\\s|$)" /etc/hosts || echo "127.0.0.1  $h" | sudo tee -a /etc/hosts >/dev/null
   done
-tfi
+fi
 
 # Default .htaccess (pretty permalinks/REST)
 cat > "$SRC_WP_DIR/.htaccess" <<'HT'
@@ -72,7 +69,6 @@ sudo tee /etc/apache2/sites-available/wp-ssl.conf >/dev/null <<CONF
   SSLEngine on
   SSLCertificateFile      "${CRT}"
   SSLCertificateKeyFile   "${KEY}"
-  SSLCertificateChainFile "${CHAIN}"
 
   # Pass Basic Auth header for WP Application Passwords
   SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=\$1
@@ -80,7 +76,6 @@ sudo tee /etc/apache2/sites-available/wp-ssl.conf >/dev/null <<CONF
   <Directory "${DST_WP_DIR}">
     AllowOverride All
     Require all granted
-    DirectoryIndex index.php
     Options -Indexes
   </Directory>
 
