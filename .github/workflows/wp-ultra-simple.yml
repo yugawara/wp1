@@ -83,6 +83,9 @@ jobs:
             --admin_password=ChangeMe! \
             --admin_email=admin@example.com
 
+      - name: Map dev hostnames to loopback
+        run: |
+          echo "127.0.0.1 aspnet.lan wp.lan" | sudo tee -a /etc/hosts
 
       - name: Start PHP development server (cd into wordpress)
         run: |
@@ -104,7 +107,6 @@ jobs:
             echo "wp_admin_user=admin"
             echo "wp_admin_app_password=$ADMIN_APP"
           } >> "$GITHUB_OUTPUT"
-
 
       - name: WP REST sanity (CLI, bypass HTTP)
         run: |
@@ -154,6 +156,7 @@ jobs:
         shell: bash
         env:
           DOMAIN: aspnet.lan
+          DOMAIN_ALIASES: wp.lan
           PORT: '8443'
           WP_DIR: ${{ github.workspace }}/wordpress
           CERT_DIR: ${{ github.workspace }}/BlazorWP/cert
@@ -163,6 +166,7 @@ jobs:
         run: |
           set -euxo pipefail
           curl -I https://aspnet.lan:8443/
+          curl -I https://wp.lan:8443/
           curl -fsS https://aspnet.lan:8443/ -o /tmp/index.html
           head -n 20 /tmp/index.html
 
@@ -170,6 +174,7 @@ jobs:
         run: |
           set -euxo pipefail
           curl -fsSI https://aspnet.lan:8443/wp-json/
+          curl -fsSI https://wp.lan:8443/wp-json/
           curl -fsS  https://aspnet.lan:8443/wp-json/wp/v2 | jq '.namespace'
 
       - name: Upload cert artifacts
@@ -200,7 +205,6 @@ jobs:
           WP_BASE_URL: ${{ steps.app.outputs.wp_base_url }}
           WP_USERNAME: ${{ steps.app.outputs.wp_admin_user }}
           WP_APP_PASSWORD: ${{ steps.app.outputs.wp_admin_app_password }}
-
 
       # ----- .NET: plain runner, user-local install (no sudo in action) -----
 
