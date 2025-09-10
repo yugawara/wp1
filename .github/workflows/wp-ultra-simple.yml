@@ -151,10 +151,10 @@ jobs:
           sudo ls -la /srv/shared/aspnet/cert || true
 
           # bring shared dir into workspace so upload-artifact can access without absolute path
-          sudo cp -r /srv/shared/aspnet/cert BlazorWP/cert/_shared
-          sudo chown -R "$USER":"$USER" BlazorWP/cert/_shared
-          find BlazorWP/cert/_shared -type d -print0 | xargs -0 chmod u+rwx,go+rx
-          find BlazorWP/cert/_shared -type f -print0 | xargs -0 chmod u+rw,go+r
+          sudo cp -r /srv/shared/aspnet/cert BlazorWP/cert/
+          sudo chown -R "$USER":"$USER" BlazorWP/cert/
+          find BlazorWP/cert/ -type d -print0 | xargs -0 chmod u+rwx,go+rx
+          find BlazorWP/cert/ -type f -print0 | xargs -0 chmod u+rw,go+r
 
       - name: Setup Apache (direct, no proxy) for WordPress
         shell: bash
@@ -162,7 +162,7 @@ jobs:
           DOMAIN: aspnet.lan
           PORT: '8443'
           WP_DIR: ${{ github.workspace }}/wordpress
-          CERT_DIR: ${{ github.workspace }}/BlazorWP/cert/_shared
+          CERT_DIR: ${{ github.workspace }}/BlazorWP/cert/
         run: BlazorWP/scripts/setup-apache-direct.sh
 
       - name: HTTPS smoke test (Apache TLS → WordPress)

@@ -6,7 +6,7 @@ set -euo pipefail
 DOMAIN="${DOMAIN:-aspnet.lan}"
 PORT="${PORT:-8443}"
 WP_DIR="${WP_DIR:-$GITHUB_WORKSPACE/wordpress}"
-CERT_DIR="${CERT_DIR:-$GITHUB_WORKSPACE/BlazorWP/cert/_shared}"
+CERT_DIR="${CERT_DIR:-$GITHUB_WORKSPACE/BlazorWP/cert}"
 
 echo "== setup-apache-direct =="
 echo "DOMAIN=$DOMAIN  PORT=$PORT"
