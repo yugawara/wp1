@@ -172,7 +172,8 @@ jobs:
         run: |
           set -euxo pipefail
           curl -I https://aspnet.lan:8443/
-          curl -fsS https://aspnet.lan:8443/ | head -n 20
+          curl -fsS https://aspnet.lan:8443/ -o /tmp/index.html
+          head -n 20 /tmp/index.html
 
       - name: Verify REST pretty route works
         run: |
