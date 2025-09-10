@@ -269,6 +269,16 @@ jobs:
           DOTNET_CLI_TELEMETRY_OPTOUT: 1
         run: dotnet test BlazorWP.E2E/BlazorWP.E2E.csproj -c Release --no-build --no-restore --logger "trx;LogFileName=e2e.trx"
 
+      - name: Deploy Blazor App to WordPress (e2e-deploy)
+        shell: bash
+        env:
+          WP_BASE_URL: ${{ env.WP_BASE_URL }}
+          TARGET_DIR: /var/www/wordpress/blazorapp
+        run: |
+          set -euxo pipefail
+          chmod +x BlazorWP/scripts/e2e-deploy.sh
+          bash BlazorWP/scripts/e2e-deploy.sh
+
       # ---------------- Playwright E2E (Chromium only) ----------------
       - name: Setup Node (for Playwright)
         uses: actions/setup-node@v4
