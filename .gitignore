@@ -32,3 +32,5 @@ blazor-publish/
 _audit/
 **/bin/
 **/obj/
+
+s.sh
