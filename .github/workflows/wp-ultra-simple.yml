@@ -88,14 +88,22 @@ jobs:
           cd wordpress
           nohup php -d display_errors=1 -S 127.0.0.1:8081 index.php > ../server.log 2>&1 &
 
-      - name: Create CI author + Application Password
+      - name: Create CI users + Application Passwords
         id: app
         run: |
+          set -euo pipefail
+          # author for REST smoke
           wp user create ci-poster ci-poster@example.com --role=author --user_pass="$(openssl rand -base64 18)" --path=wordpress
-          APP=$(wp user application-password create ci-poster gha --porcelain --path=wordpress)
-          echo "wp_base_url=http://127.0.0.1:8081" >> "$GITHUB_OUTPUT"
-          echo "wp_user=ci-poster" >> "$GITHUB_OUTPUT"
-          echo "wp_app_password=$APP" >> "$GITHUB_OUTPUT"
+          CI_APP=$(wp user application-password create ci-poster gha --porcelain --path=wordpress)
+          # admin for tests
+          ADMIN_APP=$(wp user application-password create admin gha --porcelain --path=wordpress)
+          {
+            echo "wp_base_url=http://127.0.0.1:8081"
+            echo "wp_user=ci-poster"
+            echo "wp_app_password=$CI_APP"
+            echo "wp_admin_user=admin"
+            echo "wp_admin_app_password=$ADMIN_APP"
+          } >> "$GITHUB_OUTPUT"
 
       - name: WP REST sanity (CLI, bypass HTTP)
         run: |
@@ -236,24 +244,28 @@ jobs:
       - name: Build (Release)
         run: dotnet build Workspace.sln -c Release --no-restore
 
-      - name: Run unit tests (BlazorWP.Tests) against local WP
+      # Run ALL tests in the solution (Editor.Tests + BlazorWP.Tests)
+      - name: Run all tests (Workspace.sln)
         env:
           WP_BASE_URL: ${{ steps.app.outputs.wp_base_url }}
-          WP_USER: ${{ steps.app.outputs.wp_user }}
-          WP_APP_PASSWORD: ${{ steps.app.outputs.wp_app_password }}
           WordPress__Url: ${{ steps.app.outputs.wp_base_url }}
+          # use admin creds for tests
+          WP_USER: ${{ steps.app.outputs.wp_admin_user }}
+          WP_USERNAME: ${{ steps.app.outputs.wp_admin_user }}
+          WP_APP_PASSWORD: ${{ steps.app.outputs.wp_admin_app_password }}
           DOTNET_ENVIRONMENT: Development
           DOTNET_CLI_TELEMETRY_OPTOUT: 1
         run: |
-          dotnet test BlazorWP.Tests/BlazorWP.Tests.csproj -c Release --no-build --no-restore --logger "trx;LogFileName=unit.trx"
+          dotnet test Workspace.sln -c Release --no-build --no-restore -m:1
 
       - name: Run E2E/Integration tests (if any)
         if: ${{ hashFiles('BlazorWP.E2E/*.csproj') != '' }}
         env:
           WP_BASE_URL: ${{ steps.app.outputs.wp_base_url }}
-          WP_USER: ${{ steps.app.outputs.wp_user }}
-          WP_APP_PASSWORD: ${{ steps.app.outputs.wp_app_password }}
           WordPress__Url: ${{ steps.app.outputs.wp_base_url }}
+          WP_USER: ${{ steps.app.outputs.wp_admin_user }}
+          WP_USERNAME: ${{ steps.app.outputs.wp_admin_user }}
+          WP_APP_PASSWORD: ${{ steps.app.outputs.wp_admin_app_password }}
           DOTNET_ENVIRONMENT: Development
           DOTNET_CLI_TELEMETRY_OPTOUT: 1
         run: |
