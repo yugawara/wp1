@@ -156,17 +156,14 @@ jobs:
           find BlazorWP/cert/_shared -type d -print0 | xargs -0 chmod u+rwx,go+rx
           find BlazorWP/cert/_shared -type f -print0 | xargs -0 chmod u+rw,go+r
 
-      - name: Setup Apache SSL proxy (aspnet.lan → PHP server)
+      - name: Setup Apache (direct, no proxy) for WordPress
         shell: bash
         env:
           DOMAIN: aspnet.lan
-          BACKEND: http://127.0.0.1:8081
-          LISTEN_PORT: '8443'
-          SRC_CERT_DIR: BlazorWP/cert/_shared
-        run: |
-          set -euxo pipefail
-          chmod +x BlazorWP/scripts/setup-apache-ssl-proxy.sh
-          BlazorWP/scripts/setup-apache-ssl-proxy.sh
+          PORT: '8443'
+          WP_DIR: ${{ github.workspace }}/wordpress
+          CERT_DIR: ${{ github.workspace }}/BlazorWP/cert/_shared
+        run: BlazorWP/scripts/setup-apache-direct.sh
 
       - name: HTTPS smoke test (Apache TLS → WordPress)
         run: |
