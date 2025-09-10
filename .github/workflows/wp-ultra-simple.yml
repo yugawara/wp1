@@ -87,11 +87,6 @@ jobs:
         run: |
           echo "127.0.0.1 aspnet.lan wp.lan" | sudo tee -a /etc/hosts
 
-      - name: Start PHP development server (cd into wordpress)
-        run: |
-          cd wordpress
-          nohup php -d display_errors=1 -S 127.0.0.1:8081 index.php > ../server.log 2>&1 &
-
       - name: Create CI users + Application Passwords
         id: app
         run: |
@@ -139,19 +134,6 @@ jobs:
           echo "=== Active theme ==="; wp theme list --path=wordpress --status=active
           echo "=== Plugins ==="; wp plugin list --path=wordpress || true
           echo "=== DB check ==="; wp db check --path=wordpress
-
-          echo "=== Site root (curl HEAD) ==="
-          curl -s -I http://127.0.0.1:8081/ | head -n 20
-
-          echo "=== REST index (non-pretty) ==="
-          URL='http://127.0.0.1:8081/index.php?rest_route=/'
-          if ! curl -fsS -D /tmp/rest.h -H 'Accept: application/json' "$URL" -o /tmp/rest.json; then
-            echo ">>> PHP built-in server log:"; tail -n +1 server.log || true
-            echo ">>> wp-content/debug.log:"; tail -n +1 wordpress/wp-content/debug.log || true
-            exit 1
-          fi
-          grep -i '^content-type:' /tmp/rest.h || true
-          jq -e . /tmp/rest.json > /dev/null && jq . /tmp/rest.json
 
       - name: Generate CA and certs
         shell: bash
@@ -255,8 +237,6 @@ jobs:
           sed -n '1,120p' BlazorWP/wwwroot/appsettings.json || true
           echo "--- appsettings.Development.json ---"
           sed -n '1,120p' BlazorWP/appsettings.Development.json || true
-          echo "--- Server log (if any) ---"
-          tail -n +1 server.log || true
           echo "--- PHP debug.log (if any) ---"
           tail -n +1 wordpress/wp-content/debug.log || true
 
