@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 test.describe('ILocalStore /test-memory page', () => {
   test('should add multiple items and list them', async ({ page }) => {
-    await page.goto('/test-memory');
+    await page.goto('test-memory');
 
     // Start clean
     await page.getByTestId('btn-list').click();
@@ -31,7 +31,7 @@ test.describe('ILocalStore /test-memory page', () => {
   });
 
   test('should upsert (put) without creating duplicates', async ({ page }) => {
-    await page.goto('/test-memory');
+    await page.goto('test-memory');
 
     // Put first version of draft:1
     await page.getByTestId('title-input').fill('Initial Title');
@@ -55,7 +55,7 @@ test.describe('ILocalStore /test-memory page', () => {
   });
 
   test('should retrieve and delete items by key', async ({ page }) => {
-    await page.goto('/test-memory');
+    await page.goto('test-memory');
 
     // Seed draft:1
     await page.getByTestId('title-input').fill('Temp Item');
