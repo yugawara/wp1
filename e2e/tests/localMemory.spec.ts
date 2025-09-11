@@ -1,7 +1,9 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('ILocalStore /test-memory page', () => {
-  test('should add multiple items and list them', async ({ page }) => {
+  test('should add multiple items and list them', async ({ page }, testInfo) => {
+
+  console.log('Configured baseURL:', testInfo.project.use.baseURL);
     await page.goto('test-memory');
 
     // Start clean
