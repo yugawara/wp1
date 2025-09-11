@@ -9,11 +9,13 @@ export default defineConfig({
   retries: isCI ? 2 : 0,
   workers: isCI ? 1 : undefined,
   reporter: 'html',
-
   use: {
-    baseURL: process.env.WP_BASE_URL,
+    baseURL: process.env.BLAZOR_BASE_URL,
     trace: 'on-first-retry',
+    video: 'retain-on-failure', // ✅ add this
+    screenshot: 'only-on-failure', // optional, often useful
   },
+  retries: 1, // ✅ required if you want the "on-first-retry" behavior
 
   projects: [
     {

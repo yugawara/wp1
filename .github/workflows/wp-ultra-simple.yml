@@ -313,7 +313,7 @@ jobs:
       - name: Run Playwright tests (Chromium only)
         working-directory: e2e
         env:
-          WP_BASE_URL: ${{ env.WP_BASE_URL }}
+          BLAZOR_BASE_URL: ${{ env.WP_BASE_URL }}/blazorapp
           WP_USER: ${{ env.WP_USER }}
           WP_APP_PASSWORD: ${{ env.WP_APP_PASSWORD }}
           CI: "1"
