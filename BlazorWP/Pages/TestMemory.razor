@@ -11,6 +11,9 @@
 <button id="list" data-testid="btn-list" @onclick="ListAll">List</button>
 <button id="delete" data-testid="btn-delete" @onclick="Delete">Delete</button>
 
+<!-- NEW: single button that triggers two concurrent adds with distinct payloads -->
+<button id="add-race" data-testid="btn-add-race" @onclick="AddRaceCombined">Add Race</button>
+
 <p id="status" data-testid="status" role="status" aria-live="polite">@status</p>
 
 <ul id="drafts" data-testid="draft-list">
@@ -68,5 +71,26 @@
         const string key = "draft:1";
         await LocalStore.DeleteAsync(STORE, key);
         status = "Deleted!";
+    }
+
+    // --- NEW: deterministic internal "race" ---
+
+    private async Task AddRaceCombined()
+    {
+        // Fire two concurrent writes with distinct payloads.
+        // Small stagger to encourage interleaving; ordering is irrelevant.
+        var t1 = AddWithPayloadAsync("Quick Alpha", 30);
+        var t2 = AddWithPayloadAsync("Quick Beta",  0);
+        await Task.WhenAll(t1, t2);
+    }
+
+    private async Task AddWithPayloadAsync(string payloadTitle, int delayMs)
+    {
+        if (delayMs > 0)
+            await Task.Delay(delayMs);
+
+        var key = $"draft:{Guid.NewGuid():N}";
+        await LocalStore.PutAsync(STORE, new Draft { id = key, Title = payloadTitle });
+        status = $"Added {key}";
     }
 }

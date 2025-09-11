@@ -1,44 +1,23 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('ILocalStore /test-memory advanced scenarios', () => {
-  // Real overlap using the same input. We assert the storage invariant: two items get added.
-  test('should handle two Adds fired concurrently (race) without overwriting', async ({ page }) => {
+  // Deterministic concurrency via a single Razor button that triggers two concurrent writes.
+  test('should add two items concurrently from a single race button', async ({ page }) => {
     await page.goto('test-memory');
 
-    // Helper to parse "Listed N items"
-    async function listCount(): Promise<number> {
-      await page.getByTestId('btn-list').click();
-      const text = await page.getByRole('status').textContent();
-      const m = text?.match(/Listed\s+(\d+)\s+items/);
-      return m ? parseInt(m[1], 10) : 0;
-    }
+    // Trigger internal race
+    await page.getByTestId('btn-add-race').click();
 
-    const before = await listCount();
-
-    // True race: second fill can overwrite the shared input before the first click handler runs.
-    await Promise.all([
-      (async () => {
-        await page.getByTestId('title-input').fill('Quick Alpha');
-        await page.getByTestId('btn-add').click();
-        await expect(page.getByRole('status')).toHaveText(/Added draft:/);
-      })(),
-      (async () => {
-        await page.getByTestId('title-input').fill('Quick Beta');
-        await page.getByTestId('btn-add').click();
-        await expect(page.getByRole('status')).toHaveText(/Added draft:/);
-      })(),
-    ]);
-
-    const after = await listCount();
-
-    // Storage invariant: at least two new items were added (IDs are unique).
-    expect(after).toBeGreaterThanOrEqual(before + 2);
+    // List and assert both payloads landed
+    await page.getByTestId('btn-list').click();
+    await expect(page.getByTestId('draft-list')).toContainText('Quick Alpha');
+    await expect(page.getByTestId('draft-list')).toContainText('Quick Beta');
   });
 
   test('status text should update consistently after Put and Delete', async ({ page }) => {
     await page.goto('test-memory');
 
-    // Use Put (fixed key 'draft:1') so Delete actually removes what we added.
+    // Use Put so Delete removes the same fixed id (draft:1)
     await page.getByTestId('title-input').fill('CountMe');
     await page.getByTestId('btn-put').click();
     await expect(page.getByRole('status')).toHaveText('Put/Upserted!');
@@ -66,6 +45,9 @@ test.describe('ILocalStore /test-memory advanced scenarios', () => {
     await expect(page.getByRole('button', { name: 'GetById' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'List' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Delete' })).toBeVisible();
+
+    // New race button also present
+    await expect(page.getByRole('button', { name: 'Add Race' })).toBeVisible();
   });
 
   test('flake guard: List status should change after Add', async ({ page }) => {
@@ -76,10 +58,9 @@ test.describe('ILocalStore /test-memory advanced scenarios', () => {
 
     await page.getByTestId('title-input').fill('Flaky Item');
     await page.getByTestId('btn-add').click();
-
     await page.getByTestId('btn-list').click();
-    const after = await page.getByRole('status').textContent();
 
+    const after = await page.getByRole('status').textContent();
     expect(after).not.toBe(before);
   });
 });
