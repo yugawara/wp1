@@ -3,19 +3,23 @@
 
 <h3>Test Local Memory (Harness)</h3>
 
-<input id="title" @bind="title" />
-<button id="add" @onclick="Add">Add</button>
-<button id="put" @onclick="Put">Put</button>
-<button id="get" @onclick="GetById">GetById</button>
-<button id="list" @onclick="ListAll">List</button>
-<button id="delete" @onclick="Delete">Delete</button>
+<input id="title" data-testid="title-input" @bind="title" />
 
-<p id="status">@status</p>
+<button id="add" data-testid="btn-add" @onclick="Add">Add</button>
+<button id="put" data-testid="btn-put" @onclick="Put">Put</button>
+<button id="get" data-testid="btn-get" @onclick="GetById">GetById</button>
+<button id="list" data-testid="btn-list" @onclick="ListAll">List</button>
+<button id="delete" data-testid="btn-delete" @onclick="Delete">Delete</button>
 
-<ul>
+<p id="status" data-testid="status" role="status" aria-live="polite">@status</p>
+
+<ul id="drafts" data-testid="draft-list">
   @foreach (var draft in drafts)
   {
-    <li>@draft.id - @draft.Title</li>
+    <li data-testid="draft-item">
+      <span data-testid="draft-id">@draft.id</span>
+      <span data-testid="draft-title">@draft.Title</span>
+    </li>
   }
 </ul>
 
