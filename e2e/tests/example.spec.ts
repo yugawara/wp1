@@ -9,7 +9,7 @@ test.skip('has title', async ({ page }) => {
 test('has title2', async ({ page }, testInfo) => {
   console.log('Configured baseURL:', testInfo.project.use.baseURL);
 
-  await page.goto('./');
+  await page.goto('');
 
   console.log('Navigated to:', page.url());
 
