@@ -1,43 +1,66 @@
 import { test, expect } from '@playwright/test';
 
-// These are advanced tests that complement localMemory.spec.ts and localMemory.extra.spec.ts
 test.describe('ILocalStore /test-memory advanced scenarios', () => {
-  test('should handle two Adds fired quickly (concurrency)', async ({ page }) => {
+  // Real overlap using the same input. We assert the storage invariant: two items get added.
+  test('should handle two Adds fired concurrently (race) without overwriting', async ({ page }) => {
     await page.goto('test-memory');
 
+    // Helper to parse "Listed N items"
+    async function listCount(): Promise<number> {
+      await page.getByTestId('btn-list').click();
+      const text = await page.getByRole('status').textContent();
+      const m = text?.match(/Listed\s+(\d+)\s+items/);
+      return m ? parseInt(m[1], 10) : 0;
+    }
+
+    const before = await listCount();
+
+    // True race: second fill can overwrite the shared input before the first click handler runs.
     await Promise.all([
-      page.getByTestId('title-input').fill('Quick Alpha').then(() => page.getByTestId('btn-add').click()),
-      page.getByTestId('title-input').fill('Quick Beta').then(() => page.getByTestId('btn-add').click()),
+      (async () => {
+        await page.getByTestId('title-input').fill('Quick Alpha');
+        await page.getByTestId('btn-add').click();
+        await expect(page.getByRole('status')).toHaveText(/Added draft:/);
+      })(),
+      (async () => {
+        await page.getByTestId('title-input').fill('Quick Beta');
+        await page.getByTestId('btn-add').click();
+        await expect(page.getByRole('status')).toHaveText(/Added draft:/);
+      })(),
     ]);
 
-    // List should include both, regardless of ordering
-    await page.getByTestId('btn-list').click();
-    await expect(page.getByTestId('draft-list')).toContainText('Quick Alpha');
-    await expect(page.getByTestId('draft-list')).toContainText('Quick Beta');
+    const after = await listCount();
+
+    // Storage invariant: at least two new items were added (IDs are unique).
+    expect(after).toBeGreaterThanOrEqual(before + 2);
   });
 
-  test('status text should update consistently after Add and Delete', async ({ page }) => {
+  test('status text should update consistently after Put and Delete', async ({ page }) => {
     await page.goto('test-memory');
 
+    // Use Put (fixed key 'draft:1') so Delete actually removes what we added.
     await page.getByTestId('title-input').fill('CountMe');
-    await page.getByTestId('btn-add').click();
+    await page.getByTestId('btn-put').click();
+    await expect(page.getByRole('status')).toHaveText('Put/Upserted!');
+
     await page.getByTestId('btn-list').click();
     await expect(page.getByRole('status')).toHaveText(/Listed 1 items/);
 
     await page.getByTestId('btn-delete').click();
     await expect(page.getByRole('status')).toHaveText('Deleted!');
+
     await page.getByTestId('btn-list').click();
     await expect(page.getByRole('status')).toHaveText(/Listed 0 items/);
   });
 
-  test('a11y sanity: controls and status should be discoverable by role', async ({ page }) => {
+  test('a11y sanity: controls and status are discoverable by role', async ({ page }) => {
     await page.goto('test-memory');
 
-    // Check the status element has role=status and is live
-    const status = page.getByRole('status');
-    await expect(status).toBeVisible();
+    // Make status non-empty first so it's visible.
+    await page.getByTestId('btn-list').click();
+    await expect(page.getByRole('status')).toHaveText(/Listed \d+ items/);
 
-    // Buttons should be accessible by role and label
+    await expect(page.getByRole('status')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Add' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Put' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'GetById' })).toBeVisible();
@@ -45,7 +68,7 @@ test.describe('ILocalStore /test-memory advanced scenarios', () => {
     await expect(page.getByRole('button', { name: 'Delete' })).toBeVisible();
   });
 
-  test('flaky guard: List count should always increase after Add', async ({ page }) => {
+  test('flake guard: List status should change after Add', async ({ page }) => {
     await page.goto('test-memory');
 
     await page.getByTestId('btn-list').click();
@@ -53,11 +76,10 @@ test.describe('ILocalStore /test-memory advanced scenarios', () => {
 
     await page.getByTestId('title-input').fill('Flaky Item');
     await page.getByTestId('btn-add').click();
+
     await page.getByTestId('btn-list').click();
     const after = await page.getByRole('status').textContent();
 
-    // Use regex to ensure after count is greater than or equal to before count
-    // (avoids brittleness if text changes)
     expect(after).not.toBe(before);
   });
 });
