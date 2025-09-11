@@ -42,20 +42,25 @@ namespace BlazorWP
 
             builder.Services.AddIndexedDB(db =>
             {
+                // inside builder.Services.AddIndexedDB(db => { ... });
                 db.DbName = "BlazorWPDB";
-                db.Version = 1;
+                db.Version = 2; // ⬅️ bump this when you add the new store
+
                 db.Stores.Add(new StoreSchema
                 {
                     Name = "notes",
-                    PrimaryKey = new IndexSpec
-                    {
-                        Name = "id",
-                        KeyPath = "id",
-                        Auto = false
-                    }
-                    // Add Indexes = new List<IndexSpec> { ... } if you want secondary indexes
+                    PrimaryKey = new IndexSpec { Name = "id", KeyPath = "id", Auto = false }
                 });
+
+                // NEW: generic KV store with string key `id`
+                db.Stores.Add(new StoreSchema
+                {
+                    Name = "kv",
+                    PrimaryKey = new IndexSpec { Name = "id", KeyPath = "id", Auto = false }
+                });
+
             });
+
             builder.Services.AddScoped<ILocalStore, IndexedDbLocalStore>();
 
             // 5) Build the host (this hooks up the logging provider)

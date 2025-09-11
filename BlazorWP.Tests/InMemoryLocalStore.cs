@@ -80,7 +80,8 @@ public sealed class InMemoryLocalStore : ILocalStore
 
     // --- helpers ---
 
-    private static readonly string[] KeyPropNames = { "Id", "ID", "Key", "key" };
+    private static readonly string[] KeyPropNames = { "Id", "ID", "Key", "key", "id" };
+
 
     private static bool TryGetItemKey<T>(T item, out object? key)
     {

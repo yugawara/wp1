@@ -1,0 +1,68 @@
+@page "/test-memory"
+@inject BlazorWP.Data.ILocalStore LocalStore
+
+<h3>Test Local Memory (Harness)</h3>
+
+<input id="title" @bind="title" />
+<button id="add" @onclick="Add">Add</button>
+<button id="put" @onclick="Put">Put</button>
+<button id="get" @onclick="GetById">GetById</button>
+<button id="list" @onclick="ListAll">List</button>
+<button id="delete" @onclick="Delete">Delete</button>
+
+<p id="status">@status</p>
+
+<ul>
+  @foreach (var draft in drafts)
+  {
+    <li>@draft.id - @draft.Title</li>
+  }
+</ul>
+
+@code {
+    private const string STORE = "kv";  // generic KV store (id is string)
+    private string title = "";
+    private string status = "";
+    private List<Draft> drafts = new();
+
+    // KV contract: primary key field is lowercase "id" and is a string
+    private class Draft
+    {
+        public string id { get; set; } = "";
+        public string Title { get; set; } = "";
+    }
+
+    private async Task Add()
+    {
+        var key = $"draft:{Guid.NewGuid():N}";
+        await LocalStore.PutAsync(STORE, new Draft { id = key, Title = title }); // upsert acts as insert
+        status = $"Added {key}";
+    }
+
+    private async Task Put()
+    {
+        const string key = "draft:1";
+        await LocalStore.PutAsync(STORE, new Draft { id = key, Title = title }); // upsert fixed id
+        status = "Put/Upserted!";
+    }
+
+    private async Task GetById()
+    {
+        const string key = "draft:1";
+        var result = await LocalStore.GetByKeyAsync<Draft>(STORE, key);
+        status = result?.Title ?? "Not found";
+    }
+
+    private async Task ListAll()
+    {
+        drafts = (await LocalStore.GetAllAsync<Draft>(STORE)).ToList();
+        status = $"Listed {drafts.Count} items";
+    }
+
+    private async Task Delete()
+    {
+        const string key = "draft:1";
+        await LocalStore.DeleteAsync(STORE, key);
+        status = "Deleted!";
+    }
+}
