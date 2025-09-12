@@ -2,13 +2,16 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Xunit;
-using Editor.WordPress;
 using Microsoft.Extensions.Options;
+using WordPressPCL;
+using WordPressPCL.Models;
+using Xunit;
+using Editor.WordPress; // WordPressApiService, WordPressOptions, WordPressEditor
 
 [Collection("WP EndToEnd")]
 public class WpdiTrickyCasesTests
 {
+    // ------------------ Service / client wiring (use your DI-friendly API service) ------------------
     private static WordPressApiService NewApi()
     {
         var baseUrl = Environment.GetEnvironmentVariable("WP_BASE_URL");
@@ -21,7 +24,7 @@ public class WpdiTrickyCasesTests
 
         var opts = Options.Create(new WordPressOptions
         {
-            BaseUrl     = baseUrl!,
+            BaseUrl     = baseUrl!,   // eg https://example.com
             UserName    = user!,
             AppPassword = pass!,
             Timeout     = TimeSpan.FromSeconds(20)
@@ -29,8 +32,10 @@ public class WpdiTrickyCasesTests
         return new WordPressApiService(opts);
     }
 
-    private static async Task<(string rawContent, string? modifiedGmt, JsonElement root)> GetPostEditAsync(HttpClient http, long id)
+    // ------------------ Helpers ------------------
+    private static async Task<(string rawContent, string? modifiedGmt, JsonElement root)> GetPostEditJsonAsync(HttpClient http, long id)
     {
+        // We use context=edit to get raw content + meta (WordPressPCL does not expose meta/wpdi_info by default).
         var resp = await http.GetAsync($"/wp-json/wp/v2/posts/{id}?context=edit");
         if (resp.StatusCode == HttpStatusCode.NotFound)
             return ("", null, default);
@@ -54,6 +59,10 @@ public class WpdiTrickyCasesTests
     private static string GetString(JsonElement obj, string prop)
         => obj.TryGetProperty(prop, out var el) ? el.GetString() ?? "" : "";
 
+    /// <summary>
+    /// Normalize meta.wpdi_info which may be absent, object, or array.
+    /// Returns (present, singleInfo, isArray, length).
+    /// </summary>
     private static (bool present, JsonElement singleInfo, bool isArray, int length) NormalizeWpdiInfo(JsonElement root)
     {
         if (!root.TryGetProperty("meta", out var meta)) return (false, default, false, 0);
@@ -72,65 +81,104 @@ public class WpdiTrickyCasesTests
         return (false, default, false, 0);
     }
 
-    // -------- Tricky cases --------
+    private static async Task<JsonElement[]> GetRevisionsAsync(HttpClient http, long id)
+    {
+        var resp = await http.GetAsync($"/wp-json/wp/v2/posts/{id}/revisions");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var arr = await resp.Content.ReadFromJsonAsync<JsonElement[]>();
+        return arr ?? Array.Empty<JsonElement>();
+    }
 
+    private static string ReadContentFromJson(JsonElement el)
+    {
+        if (el.TryGetProperty("content", out var c))
+        {
+            if (c.TryGetProperty("raw", out var rawEl)) return rawEl.GetString() ?? "";
+            if (c.TryGetProperty("rendered", out var renEl)) return renEl.GetString() ?? "";
+        }
+        return "";
+    }
+
+    // ------------------ Tests ------------------
+
+    // 1) Normal update: in-place save, no wpdi_info
     [Fact]
-    public async Task Update_Unmodified_InPlace_NoMeta()
+    public async Task Update_Unmodified_InPlace_NoMeta_UsingApiServiceAndPCL()
     {
         var api = NewApi();
         var http = api.HttpClient!;
+        var wpcl = (await api.GetClientAsync())!;
         var editor = new WordPressEditor(http);
 
-        var create = await editor.CreateAsync($"Wpdi Normal {Guid.NewGuid():N}", "<p>v0</p>");
+        // Create via WordPressEditor (code under test)
+        var title = $"Wpdi Normal {System.Guid.NewGuid():N}";
+        var create = await editor.CreateAsync(title, "<p>v0</p>");
         long id = create.Id;
 
         try
         {
-            var (_, lastSeen, _) = await GetPostEditAsync(http, id);
+            // Read with context=edit via HttpClient to get lastSeen + meta
+            var (_, lastSeen, _) = await GetPostEditJsonAsync(http, id);
             Assert.False(string.IsNullOrWhiteSpace(lastSeen));
 
+            // Update with editor
             var upd = await editor.UpdateAsync(id, "<p>v1</p>", lastSeen!);
             Assert.Equal(id, upd.Id);
 
-            var (raw, _, root) = await GetPostEditAsync(http, id);
-            Assert.Contains("v1", raw);
+            // Verify content via PCL (simple), and meta via HttpClient (for wpdi_info)
+            var post = await wpcl.Posts.GetByIDAsync(id);
+            var displayed = post?.Content?.Rendered ?? "";
+            Assert.Contains("v1", displayed, StringComparison.OrdinalIgnoreCase);
+
+            var (raw, _, root) = await GetPostEditJsonAsync(http, id);
+            Assert.Contains("v1", raw, StringComparison.OrdinalIgnoreCase);
 
             var (present, _, isArr, len) = NormalizeWpdiInfo(root);
-            Assert.True(!present || (isArr && len == 0));
+            Assert.True(!present || (isArr && len == 0)); // nothing or empty
         }
         finally
         {
-            var del = await http.DeleteAsync($"/wp-json/wp/v2/posts/{id}?force=true");
-            Assert.Contains(del.StatusCode, new[] { HttpStatusCode.OK, HttpStatusCode.NoContent, HttpStatusCode.NotFound });
+            await wpcl.Posts.DeleteAsync((int)id, true);
         }
     }
 
+    // 2) Conflict path: external edit via PCL, then editor updates with stale lastSeen. Revisions must contain both versions.
     [Fact]
-    public async Task Update_WithConcurrentEdit_AttachesConflictWarning_AndRevisionsContainBothVersions()
+    public async Task Update_WithConcurrentEdit_ConflictMetaIfDetected_AndRevisionsKeepBoth_UsingApiServiceAndPCL()
     {
         var api = NewApi();
         var http = api.HttpClient!;
+        var wpcl = (await api.GetClientAsync())!;
         var editor = new WordPressEditor(http);
 
-        var create = await editor.CreateAsync($"Wpdi Conflict {Guid.NewGuid():N}", "<p>initial</p>");
+        // Create via editor
+        var create = await editor.CreateAsync($"Wpdi Conflict {System.Guid.NewGuid():N}", "<p>initial</p>");
         long id = create.Id;
 
         try
         {
-            var (_, lastSeen, _) = await GetPostEditAsync(http, id);
+            // lastSeen before external change
+            var (_, lastSeen, _) = await GetPostEditJsonAsync(http, id);
             Assert.False(string.IsNullOrWhiteSpace(lastSeen));
 
-            // Ensure server timestamp differs
+            // Ensure second boundary so modified_gmt differs on some hosts
             await Task.Delay(1500);
-            var ext = await http.PostAsJsonAsync($"/wp-json/wp/v2/posts/{id}", new { content = "<p>external</p>" });
-            Assert.Equal(HttpStatusCode.OK, ext.StatusCode);
+
+            // External edit via WordPressPCL
+            var p = await wpcl.Posts.GetByIDAsync(id);
+            p!.Content.Raw = "<p>external</p>";
+            var updated = await wpcl.Posts.UpdateAsync(p);
+            Assert.NotNull(updated);
+
             await Task.Delay(1000);
 
-            var upd = await editor.UpdateAsync(id, "<p>final</p>", lastSeen!);
-            Assert.Equal(id, upd.Id);
+            // Now our stale update via editor
+            var result = await editor.UpdateAsync(id, "<p>final</p>", lastSeen!);
+            Assert.Equal(id, result.Id);
 
-            var (raw, _, root) = await GetPostEditAsync(http, id);
-            Assert.Contains("final", raw);
+            // Verify final content + (optional) conflict warning meta
+            var (raw, _, root) = await GetPostEditJsonAsync(http, id);
+            Assert.Contains("final", raw, StringComparison.OrdinalIgnoreCase);
 
             var (present, info, _, _) = NormalizeWpdiInfo(root);
             if (present)
@@ -139,49 +187,46 @@ public class WpdiTrickyCasesTests
                 Assert.Equal("Conflict", GetString(info.GetProperty("reason"), "code"));
             }
 
-            // Revisions should show both versions
-            var revs = await http.GetAsync($"/wp-json/wp/v2/posts/{id}/revisions");
-            Assert.Equal(HttpStatusCode.OK, revs.StatusCode);
-            var revArr = await revs.Content.ReadFromJsonAsync<JsonElement[]>() ?? Array.Empty<JsonElement>();
-            var contents = revArr.Take(10)
-                .Select(r =>
-                {
-                    var c = r.GetProperty("content");
-                    return c.TryGetProperty("raw", out var rawEl)
-                        ? rawEl.GetString()
-                        : c.GetProperty("rendered").GetString();
-                })
-                .Where(s => !string.IsNullOrEmpty(s))
-                .ToArray();
-            Assert.Contains(contents, s => s!.Contains("external", StringComparison.OrdinalIgnoreCase));
-            Assert.Contains(contents, s => s!.Contains("final", StringComparison.OrdinalIgnoreCase));
+            // Revisions should include both "external" and "final"
+            var revs = await GetRevisionsAsync(http, id);
+            var contents = revs.Take(10).Select(ReadContentFromJson).ToArray();
+            Assert.Contains(contents, s => s.Contains("external", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(contents, s => s.Contains("final", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
-            var del = await http.DeleteAsync($"/wp-json/wp/v2/posts/{id}?force=true");
-            Assert.Contains(del.StatusCode, new[] { HttpStatusCode.OK, HttpStatusCode.NoContent, HttpStatusCode.NotFound });
+            await wpcl.Posts.DeleteAsync((int)id, true);
         }
     }
 
+    // 3) Deleted during edit: delete via PCL, then editor.UpdateAsync must create a duplicate with NotFound reason
     [Fact]
-    public async Task Update_DeletedPost_CreatesDuplicateWithNotFoundReason()
+    public async Task Update_DeletedPost_CreatesDuplicateWithNotFoundReason_UsingApiServiceAndPCL()
     {
         var api = NewApi();
         var http = api.HttpClient!;
+        var wpcl = (await api.GetClientAsync())!;
         var editor = new WordPressEditor(http);
 
-        var create = await editor.CreateAsync($"Wpdi NotFound {Guid.NewGuid():N}", "<p>to be deleted</p>");
-        long origId = create.Id;
+        // Create via editor, then hard delete via PCL
+        var created = await editor.CreateAsync($"Wpdi NotFound {System.Guid.NewGuid():N}", "<p>to be deleted</p>");
+        long origId = created.Id;
 
-        var del = await http.DeleteAsync($"/wp-json/wp/v2/posts/{origId}?force=true");
-        Assert.Contains(del.StatusCode, new[] { HttpStatusCode.OK, HttpStatusCode.NoContent });
+        var deleted = await wpcl.Posts.DeleteAsync((int)origId, true);
+        Assert.True(deleted, "Hard delete should succeed.");
 
+        // Update via editor with stale lastSeen (any non-empty string is fine)
         var result = await editor.UpdateAsync(origId, "<p>recovered</p>", "2020-01-01T00:00:00Z");
         long newId = result.Id;
         Assert.NotEqual(origId, newId);
+        Assert.Equal("draft", result.Status);
 
-        var (raw, _, root) = await GetPostEditAsync(http, newId);
-        Assert.Contains("recovered", raw);
+        // Verify new post details (title + wpdi_info)
+        var (raw, _, root) = await GetPostEditJsonAsync(http, newId);
+        Assert.Contains("recovered", raw, StringComparison.OrdinalIgnoreCase);
+
+        var titleRendered = GetString(root.GetProperty("title"), "rendered");
+        Assert.Contains($"Recovered #{origId}", titleRendered);
 
         var (present, info, _, _) = NormalizeWpdiInfo(root);
         Assert.True(present);
@@ -189,26 +234,33 @@ public class WpdiTrickyCasesTests
         Assert.Equal("NotFound", GetString(info.GetProperty("reason"), "code"));
         Assert.Equal(origId, info.GetProperty("originalId").GetInt64());
 
+        // Old post should be gone
         var oldGet = await http.GetAsync($"/wp-json/wp/v2/posts/{origId}?context=edit");
         Assert.Equal(HttpStatusCode.NotFound, oldGet.StatusCode);
 
-        var delNew = await http.DeleteAsync($"/wp-json/wp/v2/posts/{newId}?force=true");
-        Assert.Contains(delNew.StatusCode, new[] { HttpStatusCode.OK, HttpStatusCode.NoContent, HttpStatusCode.NotFound });
+        // Cleanup
+        await wpcl.Posts.DeleteAsync((int)newId, true);
     }
 
+    // 4) Trashed during edit: trash via PCL; behavior depends on server:
+    //    - If GET acts like 404/410, editor duplicates with Trashed reason.
+    //    - Else, in-place update (likely Conflict) with no duplicate.
     [Fact]
-    public async Task Update_TrashedPost_DuplicateOrConflictDependingOnServer()
+    public async Task Update_TrashedPost_DuplicateOrConflictDependingOnServer_UsingApiServiceAndPCL()
     {
         var api = NewApi();
         var http = api.HttpClient!;
+        var wpcl = (await api.GetClientAsync())!;
         var editor = new WordPressEditor(http);
 
-        var create = await editor.CreateAsync($"Wpdi Trashed {Guid.NewGuid():N}", "<p>to be trashed</p>");
-        long origId = create.Id;
+        // Create via editor, then soft delete via PCL
+        var created = await editor.CreateAsync($"Wpdi Trashed {System.Guid.NewGuid():N}", "<p>to be trashed</p>");
+        long origId = created.Id;
 
-        var trash = await http.DeleteAsync($"/wp-json/wp/v2/posts/{origId}");
-        Assert.Contains(trash.StatusCode, new[] { HttpStatusCode.OK, HttpStatusCode.NoContent });
+        var trashed = await wpcl.Posts.DeleteAsync(origId, false); // move to trash
+        Assert.True(trashed, "Soft delete (trash) should succeed.");
 
+        // Probe behavior: some servers return 200 + status:"trash" for GET; others 404/410
         var probe = await http.GetAsync($"/wp-json/wp/v2/posts/{origId}?context=edit");
         bool behavesGone = probe.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Gone;
 
@@ -216,26 +268,41 @@ public class WpdiTrickyCasesTests
 
         if (behavesGone)
         {
-            // Duplicate draft with Trashed reason
+            // Duplicate path
             Assert.NotEqual(origId, result.Id);
-            var (raw, _, root) = await GetPostEditAsync(http, result.Id);
-            Assert.Contains("recovered after trash", raw);
+            Assert.Equal("draft", result.Status);
+
+            var (raw, _, root) = await GetPostEditJsonAsync(http, result.Id);
+            Assert.Contains("recovered after trash", raw, StringComparison.OrdinalIgnoreCase);
+
+            var titleRendered = GetString(root.GetProperty("title"), "rendered");
+            Assert.Contains($"Recovered #{origId}", titleRendered);
+
             var (present, info, _, _) = NormalizeWpdiInfo(root);
             Assert.True(present);
+            Assert.Equal("duplicate", GetString(info, "kind"));
             Assert.Equal("Trashed", GetString(info.GetProperty("reason"), "code"));
-            await http.DeleteAsync($"/wp-json/wp/v2/posts/{result.Id}?force=true");
+            Assert.Equal(origId, info.GetProperty("originalId").GetInt64());
+
+            await wpcl.Posts.DeleteAsync((int)result.Id, true);
         }
         else
         {
-            // In-place update with potential warning
+            // In-place path (likely conflict warning if timestamps differ)
             Assert.Equal(origId, result.Id);
-            var (raw, _, root) = await GetPostEditAsync(http, origId);
-            Assert.Contains("recovered after trash", raw);
-            var (present, _, _, _) = NormalizeWpdiInfo(root);
-            Assert.True(present || !present); // just ensure it parses
+
+            var (raw, _, root) = await GetPostEditJsonAsync(http, origId);
+            Assert.Contains("recovered after trash", raw, StringComparison.OrdinalIgnoreCase);
+
+            var (present, info, _, _) = NormalizeWpdiInfo(root);
+            if (present)
+            {
+                Assert.Equal("warning", GetString(info, "kind"));
+                Assert.Equal("Conflict", GetString(info.GetProperty("reason"), "code"));
+            }
         }
 
-        // Cleanup old
-        await http.DeleteAsync($"/wp-json/wp/v2/posts/{origId}?force=true");
+        // Cleanup original (hard delete)
+        await wpcl.Posts.DeleteAsync((int)origId, true);
     }
 }
