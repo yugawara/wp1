@@ -1,33 +1,13 @@
+// WpDI/tests/Editor.Tests/AdminAuthTests.cs
 using System.Net;
-using System.Net.Http.Headers;
-using System.Text;
+using Microsoft.Extensions.Options;
 using Xunit;
+using Editor.WordPress; // WordPressApiService, WordPressOptions
 
 [Collection("WP EndToEnd")]
 public class AdminAuthTests
 {
-    private static HttpClient NewClient(string baseUrl, bool allowInsecure = true)
-    {
-        if (allowInsecure && baseUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-        {
-            var handler = new HttpClientHandler
-            {
-                ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-            };
-            return new HttpClient(handler) { BaseAddress = new Uri(baseUrl), Timeout = TimeSpan.FromSeconds(15) };
-        }
-
-        return new HttpClient { BaseAddress = new Uri(baseUrl), Timeout = TimeSpan.FromSeconds(15) };
-    }
-
-    private static void SetBasicAuth(HttpClient http, string user, string pass)
-    {
-        var token = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{user}:{pass}"));
-        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", token);
-        http.DefaultRequestHeaders.Accept.ParseAdd("application/json");
-    }
-
-    private static (string BaseUrl, string User, string Pass) RequireEnv()
+    private static WordPressApiService NewApi()
     {
         var baseUrl = Environment.GetEnvironmentVariable("WP_BASE_URL");
         var user    = Environment.GetEnvironmentVariable("WP_USERNAME");
@@ -37,7 +17,14 @@ public class AdminAuthTests
         Assert.False(string.IsNullOrWhiteSpace(user),    "WP_USERNAME is not set.");
         Assert.False(string.IsNullOrWhiteSpace(pass),    "WP_APP_PASSWORD is not set.");
 
-        return (baseUrl!, user!, pass!);
+        var opts = Options.Create(new WordPressOptions
+        {
+            BaseUrl     = baseUrl!,
+            UserName    = user!,
+            AppPassword = pass!,
+            Timeout     = TimeSpan.FromSeconds(15)
+        });
+        return new WordPressApiService(opts);
     }
 
     [Fact]
@@ -46,10 +33,10 @@ public class AdminAuthTests
         var baseUrl = Environment.GetEnvironmentVariable("WP_BASE_URL");
         Assert.False(string.IsNullOrWhiteSpace(baseUrl), "WP_BASE_URL is not set.");
 
-        using var http = NewClient(baseUrl!);
+        // unauthenticated client
+        using var http = new HttpClient { BaseAddress = new Uri(baseUrl!) };
         var resp = await http.GetAsync("/wp-json/wp/v2/settings/");
         Assert.Contains(resp.StatusCode, new[] { HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden });
-
     }
 
     [Fact]
@@ -58,8 +45,10 @@ public class AdminAuthTests
         var baseUrl = Environment.GetEnvironmentVariable("WP_BASE_URL");
         Assert.False(string.IsNullOrWhiteSpace(baseUrl), "WP_BASE_URL is not set.");
 
-        using var http = NewClient(baseUrl!);
-        SetBasicAuth(http, "admin", "DefinitelyWrongPassword123!");
+        using var http = new HttpClient { BaseAddress = new Uri(baseUrl!) };
+        // supply intentionally wrong basic auth header
+        var token = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("admin:DefinitelyWrongPassword123!"));
+        http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", token);
 
         var resp = await http.GetAsync("/wp-json/wp/v2/settings");
         Assert.Contains(resp.StatusCode, new[] { HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden });
@@ -68,13 +57,13 @@ public class AdminAuthTests
     [Fact]
     public async Task Settings_Allows_Admin_With_Correct_AppPassword()
     {
-        var (baseUrl, user, pass) = RequireEnv();
+        var api  = NewApi();
+        var http = api.HttpClient!;
 
+        var pass = Environment.GetEnvironmentVariable("WP_APP_PASSWORD") ?? "";
+        var user = Environment.GetEnvironmentVariable("WP_USERNAME") ?? "";
         var masked = pass.Length > 4 ? pass[..4] + "****" : "(too short)";
         Console.WriteLine($"Using WP_USERNAME={user}, WP_APP_PASSWORD starts with '{masked}'");
-
-        using var http = NewClient(baseUrl);
-        SetBasicAuth(http, user, pass);
 
         var resp = await http.GetAsync("/wp-json/wp/v2/settings/");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
@@ -85,10 +74,8 @@ public class AdminAuthTests
     [Fact]
     public async Task Me_Endpoint_Returns_Current_User_When_Authed()
     {
-        var (baseUrl, user, pass) = RequireEnv();
-
-        using var http = NewClient(baseUrl);
-        SetBasicAuth(http, user, pass);
+        var api  = NewApi();
+        var http = api.HttpClient!;
 
         var resp = await http.GetAsync("/wp-json/wp/v2/users/me/");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
@@ -98,4 +85,3 @@ public class AdminAuthTests
         Assert.Contains("\"name\"", body);
     }
 }
-

@@ -1,46 +1,37 @@
 // WpDI/tests/Editor.Tests/OfficeCptTests.cs
 using System.Net;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using Xunit;
+using Editor.WordPress; // WordPressApiService, WordPressOptions
 
 [Collection("WP EndToEnd")]
 public class OfficeCptTests
 {
-    private static HttpClient NewClient(string baseUrl, bool allowInsecure = true)
+    // ---------- Service wiring ----------
+    private static WordPressApiService NewApi()
     {
-        if (allowInsecure && baseUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-        {
-            var handler = new HttpClientHandler
-            {
-                ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-            };
-            return new HttpClient(handler) { BaseAddress = new Uri(baseUrl), Timeout = TimeSpan.FromSeconds(15) };
-        }
-        return new HttpClient { BaseAddress = new Uri(baseUrl), Timeout = TimeSpan.FromSeconds(15) };
-    }
-
-    private static void SetBasicAuth(HttpClient http, string user, string pass)
-    {
-        var token = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{user}:{pass}"));
-        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", token);
-        http.DefaultRequestHeaders.Accept.ParseAdd("application/json");
-    }
-
-    private static (string BaseUrl, string User, string Pass, string RestBase) RequireEnv()
-    {
-        var baseUrl  = Environment.GetEnvironmentVariable("WP_BASE_URL");
-        var user     = Environment.GetEnvironmentVariable("WP_USERNAME");
-        var pass     = Environment.GetEnvironmentVariable("WP_APP_PASSWORD");
-        var restBase = Environment.GetEnvironmentVariable("WP_REST_BASE_OFFICE") ?? "office-cpt";
+        var baseUrl = Environment.GetEnvironmentVariable("WP_BASE_URL");
+        var user    = Environment.GetEnvironmentVariable("WP_USERNAME");
+        var pass    = Environment.GetEnvironmentVariable("WP_APP_PASSWORD");
 
         Assert.False(string.IsNullOrWhiteSpace(baseUrl), "WP_BASE_URL is not set.");
         Assert.False(string.IsNullOrWhiteSpace(user),    "WP_USERNAME is not set.");
         Assert.False(string.IsNullOrWhiteSpace(pass),    "WP_APP_PASSWORD is not set.");
-        return (baseUrl!, user!, pass!, restBase);
+
+        var opts = Options.Create(new WordPressOptions
+        {
+            BaseUrl     = baseUrl!,
+            UserName    = user!,
+            AppPassword = pass!,
+            Timeout     = TimeSpan.FromSeconds(15)
+        });
+        return new WordPressApiService(opts);
     }
+
+    private static string OfficeRestBase()
+        => Environment.GetEnvironmentVariable("WP_REST_BASE_OFFICE") ?? "office-cpt";
 
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web)
     {
@@ -51,10 +42,9 @@ public class OfficeCptTests
     [Fact]
     public async Task OfficeCpt_CRUD_Works_With_Data_Meta()
     {
-        var (baseUrl, user, pass, restBase) = RequireEnv();
-        using var http = NewClient(baseUrl);
-        SetBasicAuth(http, user, pass);
-
+        var api  = NewApi();
+        var http = api.HttpClient!;
+        var restBase = OfficeRestBase();
         var collectionPath = $"/wp-json/wp/v2/{restBase}";
 
         // 1) CREATE

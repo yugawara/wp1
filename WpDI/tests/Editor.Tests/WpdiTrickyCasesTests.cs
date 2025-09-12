@@ -257,7 +257,7 @@ public class WpdiTrickyCasesTests
         var created = await editor.CreateAsync($"Wpdi Trashed {System.Guid.NewGuid():N}", "<p>to be trashed</p>");
         long origId = created.Id;
 
-        var trashed = await wpcl.Posts.DeleteAsync(origId, false); // move to trash
+        var trashed = await wpcl.Posts.DeleteAsync((int)origId, false); // move to trash
         Assert.True(trashed, "Soft delete (trash) should succeed.");
 
         // Probe behavior: some servers return 200 + status:"trash" for GET; others 404/410
