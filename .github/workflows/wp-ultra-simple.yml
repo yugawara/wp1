@@ -83,29 +83,26 @@ jobs:
             --admin_password=ChangeMe! \
             --admin_email=admin@example.com
 
-      - name: Symlink repo plugins and mu-plugins into wp-content
+      - name: Materialize plugins and mu-plugins (no symlinks)
         shell: bash
         run: |
           set -euxo pipefail
           WP_CONTENT_DIR="${GITHUB_WORKSPACE}/wordpress/wp-content"
-
           mkdir -p "$WP_CONTENT_DIR/plugins" "$WP_CONTENT_DIR/mu-plugins"
 
-          # Symlink all plugin folders from repo into wp-content/plugins
-          for d in "$GITHUB_WORKSPACE"/wp/plugins/*; do
-            [ -d "$d" ] || continue
-            ln -s "$d" "$WP_CONTENT_DIR/plugins/$(basename "$d")"
-          done
+          # Copy normal plugins from repo → wp-content/plugins
+          if compgen -G "$GITHUB_WORKSPACE/wp/plugins/*" > /dev/null; then
+            rsync -a --delete "$GITHUB_WORKSPACE/wp/plugins/" "$WP_CONTENT_DIR/plugins/"
+          fi
 
-          # Symlink all mu-plugin PHP files from repo into wp-content/mu-plugins
-          for f in "$GITHUB_WORKSPACE"/wp/wp-content/mu-plugins/*.php; do
-            [ -f "$f" ] || continue
-            ln -s "$f" "$WP_CONTENT_DIR/mu-plugins/$(basename "$f")"
-          done
+          # Copy MU-plugins (flat .php files) from repo → wp-content/mu-plugins
+          if compgen -G "$GITHUB_WORKSPACE/wp/wp-content/mu-plugins/*.php" > /dev/null; then
+            rsync -a --delete "$GITHUB_WORKSPACE/wp/wp-content/mu-plugins/" "$WP_CONTENT_DIR/mu-plugins/"
+          fi
 
-          echo "=== wp-content after linking ==="
-          ls -l "$WP_CONTENT_DIR/plugins"
-          ls -l "$WP_CONTENT_DIR/mu-plugins"
+          echo "=== wp-content after copy ==="
+          ls -l "$WP_CONTENT_DIR/plugins" || true
+          ls -l "$WP_CONTENT_DIR/mu-plugins" || true
 
       - name: Map dev hostnames to loopback
         run: |
@@ -139,6 +136,10 @@ jobs:
             echo "WP_USERNAME=${{ steps.app.outputs.wp_admin_user }}"
             echo "WP_APP_PASSWORD=${{ steps.app.outputs.wp_admin_app_password }}"
           } >> "$GITHUB_ENV"
+
+      - name: Export Office CPT rest base
+        run: echo "WP_REST_BASE_OFFICE=office-cpt" >> "$GITHUB_ENV"
+
 
       - name: WP REST sanity (CLI, bypass HTTP)
         run: |
@@ -194,6 +195,15 @@ jobs:
           curl -fsSI https://aspnet.lan:8443/wp-json/
           curl -fsSI https://wp.lan:8443/wp-json/
           curl -fsS  https://aspnet.lan:8443/wp-json/wp/v2 | jq '.namespace'
+
+      - name: Verify Office CPT is registered (fail fast)
+        env:
+          WP_BASE_URL: ${{ env.WP_BASE_URL }}
+        run: |
+          set -e
+          # Ensure the CPT type doc exists and has the expected rest_base
+          curl -fsS "$WP_BASE_URL/wp-json/wp/v2/types/office-cpt" | jq -re '.rest_base=="office-cpt"' >/dev/null
+
 
       - name: Upload cert artifacts
         uses: actions/upload-artifact@v4
