@@ -83,6 +83,30 @@ jobs:
             --admin_password=ChangeMe! \
             --admin_email=admin@example.com
 
+      - name: Symlink repo plugins and mu-plugins into wp-content
+        shell: bash
+        run: |
+          set -euxo pipefail
+          WP_CONTENT_DIR="${GITHUB_WORKSPACE}/wordpress/wp-content"
+
+          mkdir -p "$WP_CONTENT_DIR/plugins" "$WP_CONTENT_DIR/mu-plugins"
+
+          # Symlink all plugin folders from repo into wp-content/plugins
+          for d in "$GITHUB_WORKSPACE"/wp/plugins/*; do
+            [ -d "$d" ] || continue
+            ln -s "$d" "$WP_CONTENT_DIR/plugins/$(basename "$d")"
+          done
+
+          # Symlink all mu-plugin PHP files from repo into wp-content/mu-plugins
+          for f in "$GITHUB_WORKSPACE"/wp/wp-content/mu-plugins/*.php; do
+            [ -f "$f" ] || continue
+            ln -s "$f" "$WP_CONTENT_DIR/mu-plugins/$(basename "$f")"
+          done
+
+          echo "=== wp-content after linking ==="
+          ls -l "$WP_CONTENT_DIR/plugins"
+          ls -l "$WP_CONTENT_DIR/mu-plugins"
+
       - name: Map dev hostnames to loopback
         run: |
           echo "127.0.0.1 aspnet.lan wp.lan" | sudo tee -a /etc/hosts
