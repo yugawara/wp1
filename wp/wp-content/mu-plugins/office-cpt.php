@@ -20,7 +20,7 @@ add_action('init', function () {
         'public'       => true,
         'show_in_rest' => true,
         'rest_base'    => 'office-cpt',     // /wp-json/wp/v2/office-cpt
-        'supports'     => [ 'title' ],
+        'supports'     => [ 'title', 'revisions' ],
         'has_archive'  => true,
         'rewrite'      => [ 'slug' => 'offices' ],
         'menu_icon'    => 'dashicons-building',
