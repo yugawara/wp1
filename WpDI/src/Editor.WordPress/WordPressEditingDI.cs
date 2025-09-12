@@ -1,26 +1,28 @@
-using System.Net.Http.Headers;
-using System.Text;
+using System;
+using System.Net.Http;
 using Editor.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 
-namespace Editor.WordPress;
-
-public static class WordPressEditingDI
+namespace Editor.WordPress
 {
-    public static IServiceCollection AddWordPressEditing(this IServiceCollection services, Action<WordPressOptions> configure)
+    public static class WordPressEditingDI
     {
-        services.Configure(configure);
-        services.AddHttpClient<IPostEditor, WordPressEditor>((sp, http) =>
+        // WPDI does not configure HttpClient—host provides it (Basic or Nonce).
+        public static IServiceCollection AddWordPressEditingFromHttp(
+            this IServiceCollection services,
+            Func<IServiceProvider, HttpClient> httpProvider)
         {
-            var o = sp.GetRequiredService<IOptions<WordPressOptions>>().Value;
-            http.BaseAddress = new Uri(o.BaseUrl);
-            http.Timeout = o.Timeout;
-            var token = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{o.UserName}:{o.AppPassword}"));
-            http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Basic", token);
-            http.DefaultRequestHeaders.Accept.ParseAdd("application/json");
-            http.DefaultRequestHeaders.AcceptEncoding.ParseAdd("gzip");
-        });
-        return services;
+            if (services == null) throw new ArgumentNullException(nameof(services));
+            if (httpProvider == null) throw new ArgumentNullException(nameof(httpProvider));
+
+            services.AddScoped<IPostEditor>(sp =>
+            {
+                var http = httpProvider(sp)
+                           ?? throw new InvalidOperationException("HttpClient provider returned null.");
+                return new WordPressEditor(http);
+            });
+
+            return services;
+        }
     }
 }
