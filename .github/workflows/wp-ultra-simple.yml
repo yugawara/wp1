@@ -92,12 +92,12 @@ jobs:
 
           # Copy normal plugins from repo → wp-content/plugins
           if compgen -G "$GITHUB_WORKSPACE/wp/plugins/*" > /dev/null; then
-            rsync -a --delete "$GITHUB_WORKSPACE/wp/plugins/" "$WP_CONTENT_DIR/plugins/"
+            rsync -an --delete "$GITHUB_WORKSPACE/wp/plugins/" "$WP_CONTENT_DIR/plugins/"
           fi
 
           # Copy MU-plugins (flat .php files) from repo → wp-content/mu-plugins
           if compgen -G "$GITHUB_WORKSPACE/wp/wp-content/mu-plugins/*.php" > /dev/null; then
-            rsync -a --delete "$GITHUB_WORKSPACE/wp/wp-content/mu-plugins/" "$WP_CONTENT_DIR/mu-plugins/"
+            rsync -an --delete "$GITHUB_WORKSPACE/wp/wp-content/mu-plugins/" "$WP_CONTENT_DIR/mu-plugins/"
           fi
 
           echo "=== wp-content after copy ==="
