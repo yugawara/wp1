@@ -57,9 +57,44 @@ public sealed class WpCliCleanupFixture : IAsyncLifetime
         return adminId;
     }
 
-    private static async Task DeleteNonAdminsAsync(string wp, string wpPath, int adminId)
+    private static async Task DeleteAllPostsAsync(string wp, string wpPath)
     {
-        var (codeList, ids, errList) = await RunWpAsync(wp, wpPath, "user list --field=ID --role__not_in=administrator --format=ids");
+        var (codeList, ids, errList) = await RunWpAsync(
+            wp, wpPath,
+            "post list --post_type=any --post_status=any --field=ID --format=ids",
+            timeoutMs: 30000);
+
+        codeList.Should().Be(0, $"wp post list should succeed. stderr: {errList}");
+
+        ids = (ids ?? "").Trim();
+        if (string.IsNullOrEmpty(ids))
+        {
+            Console.WriteLine("WP-CLI cleanup: no posts to delete.");
+            return;
+        }
+
+        var allIds = ids.Split(new[] { ' ', '\n', '\r', '\t', ',' }, StringSplitOptions.RemoveEmptyEntries);
+        Console.WriteLine($"WP-CLI cleanup: deleting {allIds.Length} posts...");
+
+        const int batchSize = 200;
+        for (int i = 0; i < allIds.Length; i += batchSize)
+        {
+            var batch = string.Join(" ", allIds.Skip(i).Take(batchSize));
+            var (codeDel, _, errDel) = await RunWpAsync(
+                wp, wpPath,
+                $"post delete {batch} --force",
+                timeoutMs: 60000);
+
+            codeDel.Should().Be(0, $"wp post delete should succeed. stderr: {errDel}");
+        }
+    }
+
+    private static async Task DeleteNonAdminsAsync(string wp, string wpPath)
+    {
+        var (codeList, ids, errList) = await RunWpAsync(
+            wp, wpPath,
+            "user list --field=ID --role__not_in=administrator --format=ids");
+
         codeList.Should().Be(0, $"wp user list (non-admins) should succeed. stderr: {errList}");
 
         ids = (ids ?? "").Trim();
@@ -69,8 +104,12 @@ public sealed class WpCliCleanupFixture : IAsyncLifetime
             return;
         }
 
-        Console.WriteLine($"WP-CLI cleanup: deleting non-admin users: {ids}");
-        var (codeDel, _, errDel) = await RunWpAsync(wp, wpPath, $"user delete {ids} --reassign={adminId} --yes", 30000);
+        Console.WriteLine($"WP-CLI cleanup: deleting non-admin users (and their content): {ids}");
+        var (codeDel, _, errDel) = await RunWpAsync(
+            wp, wpPath,
+            $"user delete {ids} --yes",
+            timeoutMs: 60000);
+
         codeDel.Should().Be(0, $"wp user delete should succeed. stderr: {errDel}");
     }
 
@@ -84,16 +123,19 @@ public sealed class WpCliCleanupFixture : IAsyncLifetime
             return;
         }
 
-        // Sanity check wp-cli
         var (verCode, verOut, verErr) = await RunWpAsync(wp, wpPath, "--version");
         verCode.Should().Be(0, $"wp --version must work. stderr: {verErr}");
         Console.WriteLine($"Using WP-CLI: {verOut.Trim()}");
 
-        var adminId = await GetAdminIdAsync(wp, wpPath);
-        Console.WriteLine($"WP-CLI cleanup: adminId = {adminId}");
-        await DeleteNonAdminsAsync(wp, wpPath, adminId);
+        // 1) Delete all posts first
+        await DeleteAllPostsAsync(wp, wpPath);
+
+        // 2) Delete all non-admin users (and their content)
+        await DeleteNonAdminsAsync(wp, wpPath);
+
+        // 3) Sanity: ensure at least one admin exists
+        var _ = await GetAdminIdAsync(wp, wpPath);
     }
 
     public Task DisposeAsync() => Task.CompletedTask;
 }
-
