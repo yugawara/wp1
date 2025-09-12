@@ -23,8 +23,17 @@ public sealed class WordPressEditor : IPostEditor
         return await ParseOrThrow(res, ct);
     }
 
-    public async Task<EditResult> UpdateAsync(long id, string html, CancellationToken ct = default)
+    /// <summary>
+    /// Update a post with Last-Write-Wins semantics.
+    /// If the server's current modified timestamp differs from the caller's lastSeenModifiedUtc,
+    /// we still update in-place but attach a Conflict warning in meta.wpdi_info so the UI can notify the user.
+    /// If the target is missing (404) or trashed (410), we create a duplicate draft with typed reason meta.
+    /// </summary>
+    public async Task<EditResult> UpdateAsync(long id, string html, string lastSeenModifiedUtc, CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(lastSeenModifiedUtc))
+            throw new ArgumentException("lastSeenModifiedUtc is required (ISO-8601 or WP modified_gmt).", nameof(lastSeenModifiedUtc));
+
         // Preflight (bypass caches)
         using var preReq = new HttpRequestMessage(
             HttpMethod.Get,
@@ -39,18 +48,17 @@ public sealed class WordPressEditor : IPostEditor
         {
             // Create a duplicate draft with *typed* meta (UI will localize)
             var reason = pre.StatusCode == HttpStatusCode.NotFound ? ReasonCode.NotFound : ReasonCode.Trashed;
-            var args   = new ReasonArgs("post", id);
 
             var meta = new
             {
                 kind = "duplicate",
                 reason = new
                 {
-                    code = reason.ToString(),   // e.g., "NotFound", "Trashed"
-                    args                        // { kind: string, id: long }
+                    code = reason.ToString(),      // "NotFound" | "Trashed"
+                    args = new { kind = "post", id }
                 },
                 originalId = id,
-                timestampUtc = DateTime.UtcNow.ToString("o") // ISO-8601
+                timestampUtc = DateTime.UtcNow.ToString("o")
             };
 
             var duplicateTitle = $"Recovered #{id} {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC";
@@ -69,8 +77,50 @@ public sealed class WordPressEditor : IPostEditor
             return await ParseOrThrow(resDup, ct);
         }
 
-        // Otherwise: attempt normal update in place
-        var updPayload = new { content = html };
+        // Otherwise: attempt normal update in place (and detect divergence for LWW warning)
+        string? serverModifiedUtc = null;
+        if (pre.IsSuccessStatusCode)
+        {
+            var preBody = await pre.Content.ReadAsStringAsync(ct);
+            try
+            {
+                using var doc = JsonDocument.Parse(preBody);
+                if (doc.RootElement.TryGetProperty("modified_gmt", out var mg))
+                    serverModifiedUtc = mg.GetString();
+            }
+            catch
+            {
+                // If parsing fails, we won't emit conflict meta (still proceed with LWW)
+            }
+        }
+
+        var conflict =
+            !string.IsNullOrWhiteSpace(serverModifiedUtc) &&
+            !string.Equals(serverModifiedUtc, lastSeenModifiedUtc, StringComparison.Ordinal);
+
+        // Build update payload: always update content; attach conflict warning meta when divergent
+        object updPayload = conflict
+            ? new
+            {
+                content = html,
+                meta = new
+                {
+                    wpdi_info = new
+                    {
+                        kind = "warning",
+                        reason = new
+                        {
+                            code = ReasonCode.Conflict.ToString(), // "Conflict"
+                            args = new { kind = "post", id }
+                        },
+                        baseModifiedUtc = lastSeenModifiedUtc,
+                        serverModifiedUtc = serverModifiedUtc,
+                        timestampUtc = DateTime.UtcNow.ToString("o")
+                    }
+                }
+            }
+            : new { content = html };
+
         using var res = await _http.PostAsync(
             $"/wp-json/wp/v2/posts/{id}",
             new StringContent(System.Text.Json.JsonSerializer.Serialize(updPayload, Json), Encoding.UTF8, "application/json"),
@@ -91,4 +141,3 @@ public sealed class WordPressEditor : IPostEditor
         );
     }
 }
-
