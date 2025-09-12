@@ -8,6 +8,24 @@
 
 defined( 'ABSPATH' ) || exit;
 
+/**
+ * Only enable this plugin on yasuaki.com (and subdomains).
+ * For wp.lan / CI / any other host, it becomes a no-op.
+ */
+function fl_is_active_host(): bool {
+    // Prefer HTTP_HOST (what the browser asked for), fallback to site home URL
+    $host = $_SERVER['HTTP_HOST'] ?? parse_url( home_url(), PHP_URL_HOST );
+    if (!is_string($host) || $host === '') return false;
+    // Match yasuaki.com and any subdomain (e.g., www.yasuaki.com, app.yasuaki.com)
+    return (bool) preg_match('/(^|\.)yasuaki\.com$/i', $host);
+}
+
+if ( ! fl_is_active_host() ) {
+    // Not yasuaki.com → do nothing on this host
+    return;
+}
+
+
 // Change this constant to the page you want to use
 if ( ! defined( 'FORCE_LOGIN_BIBLE_URL' ) ) {
     define( 'FORCE_LOGIN_BIBLE_URL', home_url( '/bible/index.html' ) );
