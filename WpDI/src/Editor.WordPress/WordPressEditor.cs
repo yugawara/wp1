@@ -1,3 +1,4 @@
+// WpDI/src/Editor.WordPress/WordPressEditor.cs
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -36,23 +37,28 @@ public sealed class WordPressEditor : IPostEditor
 
         if (pre.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Gone)
         {
-            // Duplicate draft with structured, non-localized meta (UI will localize later)
-            var reasonCode = pre.StatusCode == HttpStatusCode.NotFound ? "not_found" : "trashed";
+            // Create a duplicate draft with *typed* meta (UI will localize)
+            var reason = pre.StatusCode == HttpStatusCode.NotFound ? ReasonCode.NotFound : ReasonCode.Trashed;
+            var args   = new ReasonArgs("post", id);
+
             var meta = new
             {
                 kind = "duplicate",
-                reasonCode,                 // "not_found" | "trashed" | "conflict"
-                reasonArgs = new object[] { "post", id }, // kept as tokens for UI (.resx) to render
+                reason = new
+                {
+                    code = reason.ToString(),   // e.g., "NotFound", "Trashed"
+                    args                        // { kind: string, id: long }
+                },
                 originalId = id,
                 timestampUtc = DateTime.UtcNow.ToString("o") // ISO-8601
             };
 
-            var duplicateTitle = $"Recovered #{id} {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC"; // title itself is not localized
+            var duplicateTitle = $"Recovered #{id} {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC";
             var payload = new
             {
                 title = duplicateTitle,
                 status = "draft",
-                content = html,   // do NOT inject any banner; UI decides how to render meta
+                content = html,
                 meta = new { wpdi_info = meta }
             };
 
