@@ -15,6 +15,7 @@ TARGET_DIR="${TARGET_DIR:-/var/www/html/wordpress/blazorapp}"
 PATCH_HTACCESS="${PATCH_HTACCESS:-1}"
 USE_MSBUILD_BASE="${USE_MSBUILD_BASE:-0}"
 WP_BASE_URL="${WP_BASE_URL:-http://localhost}"   # default if not set
+WRITE_APPSETTINGS="${WRITE_APPSETTINGS:-1}"       # 1: write/override appsettings.json, 0: skip
 
 # ===== Sanity =====
 [[ "$BASE_HREF" == */ ]] || { echo "BASE_HREF must end with '/'. current: $BASE_HREF" >&2; exit 1; }
@@ -41,6 +42,26 @@ fi
 
 # Show the result
 grep -i '<base href' "$INDEX" || { echo "no <base href> found after publish/patch" >&2; exit 1; }
+
+# ===== Write/Override appsettings.json from WP_BASE_URL =====
+APPSETTINGS_JSON="$OUT_DIR/wwwroot/appsettings.json"
+if [[ "$WRITE_APPSETTINGS" == "1" ]]; then
+  echo "==> Writing appsettings.json with WP_BASE_URL=$WP_BASE_URL"
+  # Ensure target exists (normally created by publish, but be safe)
+  mkdir -p "$OUT_DIR/wwwroot"
+  cat > "$APPSETTINGS_JSON" <<JSON
+{
+  "WordPress": {
+    "Url": "${WP_BASE_URL}"
+  }
+}
+JSON
+  # quick verification
+  echo "==> appsettings.json written:"
+  head -n 20 "$APPSETTINGS_JSON" || true
+else
+  echo "==> Skipping appsettings.json override (WRITE_APPSETTINGS!=1)"
+fi
 
 # ===== Prepare target dir (works for local wp.lan and CI runner) =====
 echo "==> Ensuring target dir exists: $TARGET_DIR"
