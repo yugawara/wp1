@@ -26,7 +26,7 @@ public sealed class ContentStream : IContentStream
         options ??= new StreamOptions();
 
         // Simplified: just fetch warm 10, then bulk pages
-        var warmUrl = $"/wp-json/wp/v2/{restBase}?context=edit&per_page={options.WarmFirstCount}&orderby=modified&order=desc";
+        var warmUrl = $"/wp-json/wp/v2/{restBase}?context=edit&status=any&per_page={options.WarmFirstCount}&orderby=modified&order=desc";
         var warmItems = await FetchPageAsync(restBase, warmUrl, 1, ct);
         if (warmItems.Count > 0)
         {
@@ -42,7 +42,8 @@ public sealed class ContentStream : IContentStream
         while (true)
         {
             ct.ThrowIfCancellationRequested();
-            var bulkUrl = $"/wp-json/wp/v2/{restBase}?context=edit&per_page={options.MaxBatchSize}&page={page}";
+            var bulkUrl = $"/wp-json/wp/v2/{restBase}?context=edit&status=any&per_page={options.MaxBatchSize}&page={page}";
+
             var bulkItems = await FetchPageAsync(restBase, bulkUrl, page, ct);
             if (bulkItems.Count == 0) break;
 
