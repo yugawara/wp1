@@ -3,6 +3,7 @@ using System.Net.Http;
 using System;
 using System.Threading.Tasks;
 using Editor.WordPress;
+using BlazorWP.Data;
 
 namespace BlazorWP;
 
@@ -17,7 +18,14 @@ public sealed class WordPressApiService : IWordPressApiService
     {
         _auth = auth;
         _flags = flags;
+        _flags.OnChange += () =>
+        {
+            // If wp URL changed, drop the cached client so next call re-inits
+            _client = null;
+            _httpClient = null;
+        };
     }
+
 
     public void SetEndpoint(string endpoint)
     {
@@ -26,19 +34,17 @@ public sealed class WordPressApiService : IWordPressApiService
         _client = new WordPressClient(_httpClient);
     }
 
-    public async Task<WordPressClient?> GetClientAsync()
+    public Task<WordPressClient?> GetClientAsync()
     {
         if (_client != null)
-        {
-            return _client;
-        }
+            return Task.FromResult<WordPressClient?>(_client);
+
         var endpoint = _flags.WpUrl;
         if (string.IsNullOrEmpty(endpoint))
-        {
-            return null;
-        }
+            return Task.FromResult<WordPressClient?>(null);
+
         SetEndpoint(endpoint);
-        return _client;
+        return Task.FromResult(_client);
     }
 
     public WordPressClient? Client => _client;

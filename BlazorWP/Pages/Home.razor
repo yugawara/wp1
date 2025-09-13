@@ -144,10 +144,9 @@
     [Inject]
     private AppPasswordService AppPasswordService { get; set; } = default!;
     [Inject]
-    private AppFlags Flags { get; set; } = default!;
-    [Inject]
     private NavigationManager Navigation { get; set; } = default!;
-
+    [Inject]
+    private BlazorWP.Data.AppFlags Flags { get; set; } = default!;
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
