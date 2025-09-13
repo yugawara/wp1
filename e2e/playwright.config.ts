@@ -14,6 +14,7 @@ export default defineConfig({
     trace: 'on-first-retry',
     video: 'retain-on-failure', // ✅ add this
     screenshot: 'only-on-failure', // optional, often useful
+    ignoreHTTPSErrors: isCI,
   },
   retries: 1, // ✅ required if you want the "on-first-retry" behavior
 
