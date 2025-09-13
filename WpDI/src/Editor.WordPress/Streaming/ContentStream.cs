@@ -25,16 +25,15 @@ public sealed class ContentStream : IContentStream
     {
         options ??= new StreamOptions();
 
-        // Simplified: just fetch warm 10, then bulk pages
+        // Warm pass: include drafts/trashed
         var warmUrl = $"/wp-json/wp/v2/{restBase}?context=edit&status=any&per_page={options.WarmFirstCount}&orderby=modified&order=desc";
         var warmItems = await FetchPageAsync(restBase, warmUrl, 1, ct);
-        if (warmItems.Count > 0)
         {
             var cp = new CachePage(1, warmItems, null, null, DateTimeOffset.UtcNow);
             await _cache.UpsertPageAsync(restBase, cp, ct);
             await _cache.UpsertIndexAsync(restBase, warmItems, ct);
             yield return warmItems;
-            progress?.Report(new StreamProgress(1,0));
+            progress?.Report(new StreamProgress(1, 0));
         }
 
         // Bulk crawl
@@ -42,8 +41,7 @@ public sealed class ContentStream : IContentStream
         while (true)
         {
             ct.ThrowIfCancellationRequested();
-            var bulkUrl = $"/wp-json/wp/v2/{restBase}?context=edit&status=any&per_page={options.MaxBatchSize}&page={page}";
-
+            var bulkUrl = $"/wp-json/wp/v2/{restBase}?context=edit&status=any&per_page={options.MaxBatchSize}&orderby=modified&order=desc&page={page}";
             var bulkItems = await FetchPageAsync(restBase, bulkUrl, page, ct);
             if (bulkItems.Count == 0) break;
 
@@ -51,7 +49,7 @@ public sealed class ContentStream : IContentStream
             await _cache.UpsertPageAsync(restBase, cp, ct);
             await _cache.UpsertIndexAsync(restBase, bulkItems, ct);
             yield return bulkItems;
-            progress?.Report(new StreamProgress(page,0));
+            progress?.Report(new StreamProgress(page, 0));
             page++;
             if (bulkItems.Count < options.MaxBatchSize) break;
         }
@@ -73,7 +71,7 @@ public sealed class ContentStream : IContentStream
             string status = el.TryGetProperty("status", out var s) ? s.GetString() ?? "" : "";
             string link = el.TryGetProperty("link", out var l) ? l.GetString() ?? "" : "";
             string modified = el.TryGetProperty("modified_gmt", out var mg) ? mg.GetString() ?? "" : "";
-            return new PostSummary(id,title,status,link,modified);
+            return new PostSummary(id, title, status, link, modified);
         }).ToList();
     }
 }
