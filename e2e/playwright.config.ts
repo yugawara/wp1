@@ -10,7 +10,7 @@ export default defineConfig({
   workers: isCI ? 1 : undefined,
   reporter: [['html'], ['list']],
   use: {
-    baseURL: process.env.BLAZOR_BASE_URL,
+    baseURL: process.env.WP_BASE_URL,
     trace: 'on-first-retry',
     video: 'retain-on-failure', // ✅ add this
     screenshot: 'only-on-failure', // optional, often useful
