@@ -1,1 +1,0 @@
-../private/scripts/reset-wp-password.sh
