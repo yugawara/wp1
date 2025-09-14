@@ -164,10 +164,10 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          chmod +x BlazorWP/scripts/generate-ca-and-certs.sh
-          bash BlazorWP/scripts/generate-ca-and-certs.sh
-          echo "--- Generated cert artifacts (BlazorWP/cert) ---"
-          ls -la BlazorWP/cert || true
+          chmod +x scripts/generate-ca-and-certs.sh
+          bash scripts/generate-ca-and-certs.sh
+          echo "--- Generated cert artifacts (cert) ---"
+          ls -la cert || true
           echo "--- Shared publish dir (/srv/shared/aspnet/cert) ---"
           sudo ls -la /srv/shared/aspnet/cert || true
 
@@ -178,8 +178,8 @@ jobs:
           DOMAIN_ALIASES: wp.lan
           PORT: '8443'
           WP_DIR: ${{ github.workspace }}/wordpress
-          CERT_DIR: ${{ github.workspace }}/BlazorWP/cert
-        run: BlazorWP/scripts/setup-apache-direct.sh
+          CERT_DIR: ${{ github.workspace }}/cert
+        run: scripts/setup-apache-direct.sh
 
       - name: HTTPS smoke test (Apache TLS → WordPress)
         run: |
@@ -210,7 +210,7 @@ jobs:
         with:
           name: aspnet-dev-certs
           path: |
-            BlazorWP/cert/**
+            cert/**
           if-no-files-found: warn
           retention-days: 7
 
@@ -232,7 +232,7 @@ jobs:
           WP_BASE_URL: ${{ env.WP_BASE_URL }}
           WP_USER: ${{ env.WP_USER }}
           WP_APP_PASSWORD: ${{ env.WP_APP_PASSWORD }}
-        run: BlazorWP/scripts/check-wp-rest.sh
+        run: scripts/check-wp-rest.sh
 
       # ---------------- Playwright E2E (Chromium only) ----------------
       - name: Setup Node (for Playwright)
