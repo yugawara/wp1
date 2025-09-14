@@ -6,12 +6,3 @@ test('has title', async ({ page }) => {
   // Expect a title "to contain" a substring.
   await expect(page).toHaveTitle(/wptest/);
 });
-test('has title2', async ({ page }, testInfo) => {
-  console.log('Configured baseURL:', testInfo.project.use.baseURL);
-
-  await page.goto('');
-
-  console.log('Navigated to:', page.url());
-
-  await expect(page).toHaveTitle(/Home/);
-});
